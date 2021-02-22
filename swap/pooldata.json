@@ -1,6 +1,6 @@
 {
-    "lp_contract": "CurveTokenV1",
-    "wrapped_contract": "yERC20",
+    "lp_contract": "BeltTokenV1",
+    "wrapped_contract": "bBEP20",
     "swap_address": "",
     "lp_token_address": "",
     "zap_address": "",
