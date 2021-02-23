@@ -33,7 +33,7 @@ Belt.fi is an AMM protocol that incorporates multi-strategy yield optimizing on 
 
 # Audits and Security
 
-Belt.fi smart contracts are all now on auditing processs. These audit reports are open to public when finished.
+Belt.fi smart contracts are all currently undergoing audits. These security audit reports will be opened to the public when completed.
 
 # License
 

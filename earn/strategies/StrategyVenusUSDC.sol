@@ -770,7 +770,7 @@ contract bUSDCStratVLEV is Ownable, ReentrancyGuard, Pausable {
     address public constant wbnbAddress =
     0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
     address public constant busdAddress =
-    0xe9e7cea3dedca5984780bafc599bd69add087d56;
+    0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56;
     address public constant venusAddress =
     0xcF6BB5389c92Bdda8a3747Ddb454cB7a64626C63;
     address public constant earnedAddress = venusAddress;

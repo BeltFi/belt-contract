@@ -1041,7 +1041,7 @@ contract Pausable is Context {
     }
 }
 
-contract StrategyNone is Ownable, ReentrancyGuard, Pausable {
+contract VaultBPool is Ownable, ReentrancyGuard, Pausable {
 
     using SafeMath for uint256;
     using SafeERC20 for IERC20;
