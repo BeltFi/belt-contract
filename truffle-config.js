@@ -25,8 +25,7 @@ module.exports = {
             skipDryRun: true
         },
         mainnet: {
-//            provider: () => new HDWalletProvider(privateKey, `https://bsc-dataseed.binance.org`),
-	    provider: () => new HDWalletProvider(privateKey, 'https://api.bsc.ozys.net'),
+            provider: () => new HDWalletProvider(privateKey, `https://bsc-dataseed.binance.org`),
             network_id: 56,
 	    gasPrice: 5000000000,
             confirmations: 3,
