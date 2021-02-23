@@ -30,15 +30,15 @@ contract bERC20:
 
 from vyper.interfaces import ERC20
 
-N_COINS: constant(int128) = 4 
+N_COINS: constant(int128) = 4  # <- change
 
-ZERO256: constant(uint256) = 0  
-ZEROS: constant(uint256[N_COINS]) = [ZERO256, ZERO256, ZERO256, ZERO256]
+ZERO256: constant(uint256) = 0  # This hack is really bad XXX
+ZEROS: constant(uint256[N_COINS]) = [ZERO256, ZERO256, ZERO256, ZERO256]  # <- change
 
 TETHERED: constant(bool[N_COINS]) = [False, False, False, False]
 
 FEE_DENOMINATOR: constant(uint256) = 10 ** 10
-PRECISION: constant(uint256) = 10 ** 18 
+PRECISION: constant(uint256) = 10 ** 18  # The precision to convert to
 PRECISION_MUL: constant(uint256[N_COINS]) = [convert(1, uint256), convert(1, uint256), convert(1, uint256), convert(1, uint256)]
 
 admin_actions_delay: constant(uint256) = 3 * 86400
@@ -57,9 +57,9 @@ NewParameters: event({A: uint256, fee: uint256, buyback_fee: uint256})
 coins: public(address[N_COINS])
 underlying_coins: public(address[N_COINS])
 balances: public(uint256[N_COINS])
-A: public(uint256)  
-fee: public(uint256)  
-buyback_fee: public(uint256) 
+A: public(uint256)  # 2 x amplification coefficient
+fee: public(uint256)  # fee * 1e10
+buyback_fee: public(uint256)  # buyback_fee * 1e10
 max_buyback_fee: constant(uint256) = 5 * 10 ** 9
 
 owner: public(address)
@@ -95,6 +95,11 @@ def __init__(_coins: address[N_COINS], _underlying_coins: address[N_COINS],
     self.is_killed = False
     self.token = ERC20m(_pool_token)
 
+
+@public
+@constant
+def pool_token() -> address:
+    return self.token
 
 @private
 @constant
@@ -138,7 +143,7 @@ def get_D(xp: uint256[N_COINS]) -> uint256:
     for _i in range(255):
         D_P: uint256 = D
         for _x in xp:
-            D_P = D_P * D / (_x * N_COINS + 1)  
+            D_P = D_P * D / (_x * N_COINS + 1)  # +1 is to prevent /0
         Dprev = D
         D = (Ann * S + D_P * N_COINS) * D / ((Ann - 1) * D + (N_COINS + 1) * D_P)
 
@@ -161,7 +166,8 @@ def get_D_mem(rates: uint256[N_COINS], _balances: uint256[N_COINS]) -> uint256:
 @constant
 def get_virtual_price() -> uint256:
     D: uint256 = self.get_D(self._xp(self._stored_rates()))
-
+    # D is in the units similar to DAI (e.g. converted to precision 1e18)
+    # When balanced, D = n * x_u - total virtual value of the portfolio
     token_supply: uint256 = self.token.totalSupply()
     return D * PRECISION / token_supply
 
@@ -233,7 +239,7 @@ def add_liquidity(amounts: uint256[N_COINS], min_mint_amount: uint256):
 
     mint_amount: uint256 = 0
     if token_supply == 0:
-        mint_amount = D1 
+        mint_amount = D1  # Take the dust if there was any
     else:
         mint_amount = token_supply * (D2 - D0) / D0
 
@@ -244,7 +250,7 @@ def add_liquidity(amounts: uint256[N_COINS], min_mint_amount: uint256):
             bERC20(self.coins[i]).transferFrom(msg.sender, self, amounts[i]))
 
 
-
+    # Mint pool tokens
     self.token.mint(msg.sender, mint_amount)
 
     log.AddLiquidity(msg.sender, amounts, fees, D1, token_supply + mint_amount)
@@ -272,13 +278,13 @@ def get_y(i: int128, j: int128, x: uint256, _xp: uint256[N_COINS]) -> uint256:
         S_ += _x
         c = c * D / (_x * N_COINS)
     c = c * D / (Ann * N_COINS)
-    b: uint256 = S_ + D / Ann
+    b: uint256 = S_ + D / Ann  # - D
     y_prev: uint256 = 0
     y: uint256 = D
     for _i in range(255):
         y_prev = y
         y = (y*y + c) / (2 * y + b - D)
-
+        # Equality with the precision of 1
         if y > y_prev:
             if y - y_prev <= 1:
                 break
@@ -419,7 +425,7 @@ def remove_liquidity(_amount: uint256, min_amounts: uint256[N_COINS]):
         assert_modifiable(bERC20(self.coins[i]).transfer(
             msg.sender, value))
 
-    self.token.burnFrom(msg.sender, _amount) 
+    self.token.burnFrom(msg.sender, _amount)  # Will raise if not enough
 
     log.RemoveLiquidity(msg.sender, amounts, fees, total_supply - _amount)
 
@@ -460,7 +466,7 @@ def remove_liquidity_imbalance(amounts: uint256[N_COINS], max_burn_amount: uint2
 
     for i in range(N_COINS):
         assert_modifiable(bERC20(self.coins[i]).transfer(msg.sender, amounts[i]))
-    self.token.burnFrom(msg.sender, token_amount)
+    self.token.burnFrom(msg.sender, token_amount)  # Will raise if not enough
 
     log.RemoveLiquidityImbalance(msg.sender, amounts, fees, D1, token_supply - token_amount)
 
