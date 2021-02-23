@@ -1,0 +1,8 @@
+{
+  "name": "belt-contract",
+  "version": "1.0.0",
+  "dependencies": {},
+  "devDependencies": {
+    "truffle-hdwallet-provider": "^1.0.17"
+  }
+}
