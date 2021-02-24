@@ -5,8 +5,9 @@
 https://belt.fi 
  
 # Overview
- 
-Belt.fi is an AMM protocol that incorporates multi-strategy yield optimizing on Binance Smart Chain (BSC) with low fees/slippage that also provides aggregation through vault compounding, lending and yield generation for high profits. 
+
+Belt.fi is an AMM protocol that incorporates multi-strategy yield optimizing on Binance Smart Chain (BSC) with low fees/slippage that also provides aggregation through vault compounding, lending and yield generation for maximum returns. 
+
  
 ![system_overview](./img/system_overview.png)
  
@@ -33,8 +34,9 @@ Belt.fi is an AMM protocol that incorporates multi-strategy yield optimizing on 
 
 # Audits and Security
 
-Belt.fi smart contracts are all currently undergoing audits. These security audit reports will be opened to the public when completed.
+Belt.fi smart contracts are all currently undergoing audits. These security audit reports will be opened to the public when completed. 
+
 
 # License
 
-(c) Belft.Fi, 2021 - All rights reserved.
+Copyright (c) 2021, Ozys Pte., Ltd. - All rights reserved. 
