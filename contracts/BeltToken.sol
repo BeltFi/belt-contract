@@ -647,7 +647,44 @@ abstract contract Ownable is Context {
 }
 
 
-contract BELT is ERC20("TEST TOKEN", "TEST"), Ownable {
+contract BELT is ERC20, Ownable {
+
+    uint public initialSupply;
+    uint public initialSupplyRemaining;
+    address public initialSupplyClaimer;
+    uint public startBlockMining;
+    uint public BELTPerBlock = 1000000000000000000;
+    address public burnAddress = 0x000000000000000000000000000000000000dEaD;
+
+    constructor(string memory name_, string memory symbol_, uint initialSupply_, address initialSupplyClaimer_, uint startBlockMining_) ERC20(name_, symbol_) public {
+        initialSupply = initialSupply_;
+        initialSupplyRemaining = initialSupply;
+        initialSupplyClaimer = initialSupplyClaimer_;
+        startBlockMining = startBlockMining_;
+    }
+
+    function claimInitialSupply(uint _amount) public {
+        require(msg.sender==initialSupplyClaimer, "msg.sener has no authority");
+        require(initialSupplyRemaining >= _amount, "_amount exceed an allowance");
+
+        initialSupplyRemaining = initialSupplyRemaining - _amount;
+        _mint(initialSupplyClaimer, _amount);
+    }
+
+    function getCirculatingSupply() public view returns (uint) {
+        uint circulatingSupply = initialSupply - initialSupplyRemaining;
+
+        if(block.number > startBlockMining){
+            circulatingSupply = circulatingSupply + (block.number - startBlockMining) * BELTPerBlock;
+        }
+
+        if(circulatingSupply >= balanceOf(burnAddress)){
+            circulatingSupply = circulatingSupply - balanceOf(burnAddress);
+        }
+
+        return circulatingSupply;
+    }
+
     function mint(address _to, uint256 _amount) public onlyOwner {
         _mint(_to, _amount);
     }

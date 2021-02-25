@@ -9,7 +9,7 @@ https://belt.fi
 Belt.fi is an AMM protocol that incorporates multi-strategy yield optimizing on Binance Smart Chain (BSC) with low fees/slippage that also provides aggregation through vault compounding, lending and yield generation for maximum returns. 
 
  
-![system_overview](./img/system_overview.png)
+![system_overview](./img/belt.jpg)
  
 # Contract Architecture
 
