@@ -51,8 +51,8 @@ RemoveLiquidity: event({provider: indexed(address), token_amounts: uint256[N_COI
 RemoveLiquidityImbalance: event({provider: indexed(address), token_amounts: uint256[N_COINS], fees: uint256[N_COINS], invariant: uint256, token_supply: uint256})
 CommitNewAdmin: event({deadline: indexed(timestamp), admin: indexed(address)})
 NewAdmin: event({admin: indexed(address)})
-CommitNewParameters: event({deadline: indexed(timestamp), A: uint256, fee: uint256, buyback_fee: uint256})
-NewParameters: event({A: uint256, fee: uint256, buyback_fee: uint256})
+CommitNewParameters: event({deadline: indexed(timestamp), A: uint256, fee: uint256, buyback_fee: uint256, buyback_addr: address})
+NewParameters: event({A: uint256, fee: uint256, buyback_fee: uint256, buyback_addr: address})
 
 coins: public(address[N_COINS])
 underlying_coins: public(address[N_COINS])
@@ -63,6 +63,7 @@ buyback_fee: public(uint256)  # buyback_fee * 1e10
 max_buyback_fee: constant(uint256) = 5 * 10 ** 9
 
 owner: public(address)
+buyback_addr: public(address)
 token: ERC20m
 
 admin_actions_deadline: public(timestamp)
@@ -71,6 +72,7 @@ future_A: public(uint256)
 future_fee: public(uint256)
 future_buyback_fee: public(uint256)
 future_owner: public(address)
+future_buyback_addr: public(address)
 
 kill_deadline: timestamp
 kill_deadline_dt: constant(uint256) = 2 * 30 * 86400
@@ -80,7 +82,7 @@ is_killed: bool
 @public
 def __init__(_coins: address[N_COINS], _underlying_coins: address[N_COINS],
              _pool_token: address,
-             _A: uint256, _fee: uint256, _buyback_fee: uint256):
+             _A: uint256, _fee: uint256, _buyback_fee: uint256,_buyback_addr: address):
     for i in range(N_COINS):
         assert _coins[i] != ZERO_ADDRESS
         assert _underlying_coins[i] != ZERO_ADDRESS
@@ -94,6 +96,7 @@ def __init__(_coins: address[N_COINS], _underlying_coins: address[N_COINS],
     self.kill_deadline = block.timestamp + kill_deadline_dt
     self.is_killed = False
     self.token = ERC20m(_pool_token)
+    self.buyback_addr = _buyback_addr
 
 
 @public
@@ -474,7 +477,8 @@ def remove_liquidity_imbalance(amounts: uint256[N_COINS], max_burn_amount: uint2
 @public
 def commit_new_parameters(amplification: uint256,
                           new_fee: uint256,
-                          new_buyback_fee: uint256):
+                          new_buyback_fee: uint256,
+                          new_buyback_addr: address):
     assert msg.sender == self.owner
     assert self.admin_actions_deadline == 0
     assert new_buyback_fee <= max_buyback_fee
@@ -484,8 +488,10 @@ def commit_new_parameters(amplification: uint256,
     self.future_A = amplification
     self.future_fee = new_fee
     self.future_buyback_fee = new_buyback_fee
+    self.future_buyback_addr = new_buyback_addr
 
-    log.CommitNewParameters(_deadline, amplification, new_fee, new_buyback_fee)
+
+    log.CommitNewParameters(_deadline, amplification, new_fee, new_buyback_fee, new_buyback_addr)
 
 
 @public
@@ -498,11 +504,13 @@ def apply_new_parameters():
     _A: uint256 = self.future_A
     _fee: uint256 = self.future_fee
     _buyback_fee: uint256 = self.future_buyback_fee
+    _buyback_addr: address = self.future_buyback_addr
     self.A = _A
     self.fee = _fee
     self.buyback_fee = _buyback_fee
+    self.buyback_addr = _buyback_addr
 
-    log.NewParameters(_A, _fee, _buyback_fee)
+    log.NewParameters(_A, _fee, _buyback_fee,_buyback_addr)
 
 
 @public
@@ -544,29 +552,16 @@ def revert_transfer_ownership():
     self.transfer_ownership_deadline = 0
 
 
-@public
-def burn_buyback_fees():
-    assert msg.sender == self.owner
-    _precisions: uint256[N_COINS] = PRECISION_MUL
-
-    for i in range(N_COINS):
-        c: address = self.coins[i]
-        value: uint256 = bERC20(c).balanceOf(self) - self.balances[i]
-
-        if value > 0:
-            assert_modifiable(bERC20(c).transfer(msg.sender, value))
-
 
 @public
 def withdraw_buyback_fees():
-    assert msg.sender == self.owner
     _precisions: uint256[N_COINS] = PRECISION_MUL
 
     for i in range(N_COINS):
         c: address = self.coins[i]
         value: uint256 = bERC20(c).balanceOf(self) - self.balances[i]
         if value > 0:
-            assert_modifiable(bERC20(c).transfer(msg.sender, value))
+            assert_modifiable(bERC20(c).transfer(buyback_addr, value))
 
 
 @public
