@@ -313,7 +313,8 @@ contract bUSDC is ERC20, ERC20Detailed, ReentrancyGuard, Ownable {
             shares = _amount;
             pool = _amount;
         } else {
-            shares = (_amount.mul(totalSupply())).div(pool);
+            //0.1%(999/1000) enterance fee 
+            shares = (_amount.mul(totalSupply())).div(pool).mul(999).div(1000);
         }
         pool = calcPoolValueInToken();
         _mint(msg.sender, shares);

@@ -872,11 +872,13 @@ contract bUSDTStratVLEV is Ownable, ReentrancyGuard, Pausable {
     }
 
     function _farm(bool _withLev) internal {
-        if (wantIsWBNB) {
-            _unwrapBNB();
-            _leverage(address(this).balance, _withLev);
-        } else {
-            _leverage(wantLockedInHere(), _withLev);
+        if(wantLockedInHere() > 10e18){
+            if (wantIsWBNB) {
+                _unwrapBNB();
+                _leverage(address(this).balance, _withLev);
+            } else {
+                _leverage(wantLockedInHere(), _withLev);
+            }
         }
 
         updateBalance();
