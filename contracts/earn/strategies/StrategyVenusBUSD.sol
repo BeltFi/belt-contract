@@ -882,12 +882,20 @@ contract bBUSDStratVLEV is Ownable, ReentrancyGuard, Pausable {
     }
 
     function _farm(bool _withLev) internal {
-        if(wantLockedInHere() > 10e18){
+        if(wantLockedInHere() > 1e18){
             if (wantIsWBNB) {
                 _unwrapBNB();
                 _leverage(address(this).balance, _withLev);
             } else {
                 _leverage(wantLockedInHere(), _withLev);
+            }
+        }
+        else{
+            if (wantIsWBNB) {
+                _unwrapBNB();
+                _leverage(address(this).balance, false);
+            } else {
+                _leverage(wantLockedInHere(), false);
             }
         }
 
@@ -1057,7 +1065,7 @@ contract bBUSDStratVLEV is Ownable, ReentrancyGuard, Pausable {
 
         uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
         if (wantBal < _wantAmt) {
-            _deleverage(true, _wantAmt.sub(wantBal));
+            _deleverage(true, _wantAmt);
             if (wantIsWBNB) {
                 _wrapBNB();
             }
