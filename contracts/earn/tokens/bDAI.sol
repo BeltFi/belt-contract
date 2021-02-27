@@ -293,10 +293,9 @@ contract bDAI is ERC20, ERC20Detailed, ReentrancyGuard, Ownable {
 
     Lender public provider = Lender.NONE;
 
-    constructor (address _token, address _venus) public ERC20Detailed("Test DAI", "tDAI", 18) {
+    constructor (string memory name_, string memory symbol_, address _token, address _venus) public ERC20Detailed(name_, symbol_, 18) {
         token = _token;
         venus = _venus;
-
         approveToken();
     }
 
