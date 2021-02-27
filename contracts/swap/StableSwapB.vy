@@ -561,7 +561,7 @@ def withdraw_buyback_fees():
         c: address = self.coins[i]
         value: uint256 = bERC20(c).balanceOf(self) - self.balances[i]
         if value > 0:
-            assert_modifiable(bERC20(c).transfer(buyback_addr, value))
+            assert_modifiable(bERC20(c).transfer(self.buyback_addr, value))
 
 
 @public
