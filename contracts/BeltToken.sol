@@ -653,7 +653,7 @@ contract BELT is ERC20, Ownable {
     uint public initialSupplyRemaining;
     address public initialSupplyClaimer;
     uint public startBlockMining;
-    uint public BELTPerBlock = 1000000000000000000;
+    uint public BELTPerBlock = 1178000000000000000;
     address public burnAddress = 0x000000000000000000000000000000000000dEaD;
 
     constructor(string memory name_, string memory symbol_, uint initialSupply_, address initialSupplyClaimer_, uint startBlockMining_) ERC20(name_, symbol_) public {
