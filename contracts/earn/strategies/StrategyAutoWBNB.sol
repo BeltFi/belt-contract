@@ -730,7 +730,6 @@ contract aWBNBStratAuto is Ownable, ReentrancyGuard, Pausable {
         whenNotPaused
         returns (uint256)
     {
-        AUTOFarm(autoFarmAddress).deposit(poolId, _wantAmt);
 
         uint256 sharesAdded = _wantAmt;
         if (wantLockedTotal() > 0 && sharesTotal > 0) {
@@ -748,6 +747,7 @@ contract aWBNBStratAuto is Ownable, ReentrancyGuard, Pausable {
             _wantAmt
         );
 
+        AUTOFarm(autoFarmAddress).deposit(poolId, _wantAmt);
         balanceSnapshot = balanceSnapshot.add(_wantAmt);
 
         return sharesAdded;
