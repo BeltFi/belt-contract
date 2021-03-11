@@ -685,7 +685,7 @@ interface AUTOFarm {
 interface AUTOToken is IERC20 {
 }
 
-contract bBTCBStratAUTO is Ownable, ReentrancyGuard, Pausable {
+contract aBTCBStratAUTO is Ownable, ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
     using Address for address;
     using SafeMath for uint256;
