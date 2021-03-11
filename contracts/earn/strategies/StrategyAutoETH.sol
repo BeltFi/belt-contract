@@ -710,19 +710,11 @@ contract bETHStratAUTO is Ownable, ReentrancyGuard, Pausable {
     uint256 public sharesTotal = 0;
     uint256 public lastEarnBlock = 0;
 
-    uint256 public controllerFee = 0;
-    uint256 public constant controllerFeeMax = 10000; 
-    uint256 public constant controllerFeeUL = 300;
-
     uint256 public buyBackRate = 800;
     uint256 public constant buyBackRateMax = 10000;
     uint256 public constant buyBackRateUL = 800;
     address public constant buyBackAddress =
         0x000000000000000000000000000000000000dEaD;
-
-    uint256 public entranceFeeFactor = 10000;
-    uint256 public constant entranceFeeFactorMax = 10000;
-    uint256 public constant entranceFeeFactorLL = 9950;
 
     address[] public autoToWantPath;
     address[] public earnedToBELTPath;
@@ -764,9 +756,7 @@ contract bETHStratAUTO is Ownable, ReentrancyGuard, Pausable {
         if (wantLockedTotal() > 0 && sharesTotal > 0) {
             sharesAdded = _wantAmt
                 .mul(sharesTotal)
-                .mul(entranceFeeFactor)
-                .div(wantLockedTotal())
-                .div(entranceFeeFactorMax);
+                .div(wantLockedTotal());
         }
 
         sharesTotal = sharesTotal.add(sharesAdded);
@@ -789,7 +779,6 @@ contract bETHStratAUTO is Ownable, ReentrancyGuard, Pausable {
         uint256 currentBalance = AUTOFarm(autoFarmAddress).stakedWantTokens(poolId, address(this));
 
         uint256 earnedAmt = IERC20(autoAddress).balanceOf(address(this));
-        earnedAmt = distributeFees(earnedAmt);
         earnedAmt = buyBack(earnedAmt);
 
         if (autoAddress != wantAddress) {
@@ -802,7 +791,7 @@ contract bETHStratAUTO is Ownable, ReentrancyGuard, Pausable {
             );
         }
 
-        earnedAmt = distributeWantFees(currentBalance.sub(prevBalance));
+        earnedAmt = currentBalance.sub(prevBalance);
         earnedAmt = buyBackWant(earnedAmt);
         
         balanceSnapshot = AUTOFarm(autoFarmAddress).stakedWantTokens(poolId, address(this));
@@ -831,20 +820,6 @@ contract bETHStratAUTO is Ownable, ReentrancyGuard, Pausable {
         return _earnedAmt.sub(buyBackAmt);
     }
 
-    function distributeWantFees(uint256 _earnedAmt) internal returns (uint256) {
-        if (_earnedAmt > 0) {
-            if (controllerFee > 0) {
-                uint256 fee =
-                    _earnedAmt.mul(controllerFee).div(controllerFeeMax);
-                AUTOFarm(autoFarmAddress).withdraw(poolId, fee);
-                IERC20(wantAddress).safeTransfer(govAddress, fee);
-                return _earnedAmt.sub(fee);
-            }
-        }
-
-        return _earnedAmt;
-    }
-
     function buyBack(uint256 _earnedAmt) internal returns (uint256) {
         if (buyBackRate <= 0) {
             return _earnedAmt;
@@ -864,19 +839,6 @@ contract bETHStratAUTO is Ownable, ReentrancyGuard, Pausable {
         IERC20(BELTAddress).safeTransfer(buyBackAddress, burnAmt);
 
         return _earnedAmt.sub(buyBackAmt);
-    }
-
-    function distributeFees(uint256 _earnedAmt) internal returns (uint256) {
-        if (_earnedAmt > 0) {
-            if (controllerFee > 0) {
-                uint256 fee =
-                    _earnedAmt.mul(controllerFee).div(controllerFeeMax);
-                IERC20(autoAddress).safeTransfer(govAddress, fee);
-                return _earnedAmt.sub(fee);
-            }
-        }
-
-        return _earnedAmt;
     }
 
     function withdraw(uint256 _wantAmt)
@@ -936,19 +898,6 @@ contract bETHStratAUTO is Ownable, ReentrancyGuard, Pausable {
     function wantLockedInHere() public view returns (uint256) {
         uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
         return wantBal;
-    }
-
-    function setEntranceFeeFactor(uint256 _entranceFeeFactor) public {
-        require(msg.sender == govAddress, "Not authorised");
-        require(_entranceFeeFactor > entranceFeeFactorLL, "!safe - too low");
-        require(_entranceFeeFactor <= entranceFeeFactorMax, "!safe - too high");
-        entranceFeeFactor = _entranceFeeFactor;
-    }
-
-    function setControllerFee(uint256 _controllerFee) public {
-        require(msg.sender == govAddress, "Not authorised");
-        require(_controllerFee <= controllerFeeUL, "too high");
-        controllerFee = _controllerFee;
     }
 
     function setbuyBackRate(uint256 _buyBackRate) public {
