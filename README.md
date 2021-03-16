@@ -38,12 +38,14 @@ Belt.fi is an AMM protocol that incorporates multi-strategy yield optimizing on 
 
 - StableSwapB.vy 
 
-
+- BeltSwapRouterV1.sol
 
 # Audits and Security
 
-Belt.fi smart contracts are all currently undergoing audits. These security audit reports will be opened to the public when completed. 
+Our first audit was conducted by SOOHO, a CONSENSYS-backed blockchain security firm. 
+You can check the audit report here: 
 
+https://github.com/BeltFi/belt-contract/blob/main/audit/%5BENG%5DBELTFI_Security_Assessment.pdf
 
 # License
 
