@@ -1,0 +1,54 @@
+{
+    "lp_contract": "CurveTokenV1",
+    "wrapped_contract": "yERC20",
+    "swap_address": "",
+    "lp_token_address": "",
+    "zap_address": "",
+    "gauge_addresses": [""],
+    "lp_constructor": {
+        "symbol": "Belt.fi bDAI/bUSDC/bUSDT/bBUSD",
+        "name": "bDAI+bUSDC+bUSDT+bBUSD",
+        "decimals": 18,
+        "supply": 0
+    },
+    "swap_constructor": {
+        "_A": 1000,
+        "_fee": 10000000,
+        "_buyback_fee": 5000000000,
+	"_buyback_addr" : "0x5A63602C6a4C67984eF4AcF5a0BCC41197d4B534"
+    },
+    "coins": [
+        {
+            "name": "DAI",
+            "decimals": 18,
+            "tethered": false,
+            "wrapped_decimals": 18,
+            "underlying_address": "0x6b175474e89094c44da98b954eedeac495271d0f",
+            "wrapped_address": "0x16de59092dAE5CcF4A1E6439D611fd0653f0Bd01"
+        },
+        {
+            "name": "USDC",
+            "decimals": 6,
+            "tethered": false,
+            "wrapped_decimals": 6,
+            "underlying_address": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+            "wrapped_address": "0xd6aD7a6750A7593E092a9B218d66C0A814a3436e"
+        },
+        {
+            "name": "USDT",
+            "decimals": 6,
+            "tethered": true,
+            "wrapped_decimals": 6,
+            "underlying_address": "0xdac17f958d2ee523a2206206994597c13d831ec7",
+            "wrapped_address": "0x83f798e925BcD4017Eb265844FDDAbb448f1707D"
+        },
+        {
+            "name": "TUSD",
+            "decimals": 18,
+            "tethered": false,
+            "wrapped_decimals": 18,
+            "underlying_address": "0x0000000000085d4780b73119b644ae5ecd22b376",
+            "wrapped_address": "0x73a052500105205d34daf004eab301916da8190f"
+        }
+    ]
+}
