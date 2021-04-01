@@ -9,7 +9,7 @@ interface IWBNB is IERC20 {
     function withdraw(uint256 wad) external;
 }
 
-contract StrategyAlpacaSingle is Strategy {
+contract StrategyAlpaca is Strategy {
 
     address public uniRouterAddress;
 
@@ -92,7 +92,7 @@ contract StrategyAlpacaSingle is Strategy {
 
     function _deposit(uint _wantAmt) internal {
         if(isWbnb) {
-            _unwrapBNB(_wantAmt);
+            _unwrapBNB();
             Vault(vaultAddress).deposit{value: _wantAmt}(_wantAmt);
         } else {
             Vault(vaultAddress).deposit(_wantAmt);
@@ -136,12 +136,21 @@ contract StrategyAlpacaSingle is Strategy {
     function buyBackWant(uint256 _earnedAmt) internal {
         if (buyBackRate != 0) {
             uint256 buyBackAmt = _earnedAmt.mul(buyBackRate).div(buyBackRateMax);
+
+            if(isWbnb) {
+                _wrapBNB();
+            }
+
             uint256 curWantBal = IERC20(wantAddress).balanceOf(address(this));
+
             if (curWantBal < buyBackAmt) {
                 _withdraw(buyBackAmt.sub(curWantBal));
-                buyBackAmt = address(this).balance;
-                _wrapBNB(buyBackAmt);
+                if(isWbnb) {
+                    _wrapBNB();
+                }
+                buyBackAmt = IERC20(wantAddress).balanceOf(address(this));
             }
+
             IPancakeRouter02(uniRouterAddress).swapExactTokensForTokens(
                 buyBackAmt,
                 0,
@@ -185,21 +194,17 @@ contract StrategyAlpacaSingle is Strategy {
     {
         _wantAmt = _wantAmt.mul(withdrawFeeDenom.sub(withdrawFeeNumer)).div(withdrawFeeDenom);
 
-        uint wantBal;
-        if(isWbnb) {
-            wantBal = address(this).balance;
-        } else {
-            wantBal = IERC20(wantAddress).balanceOf(address(this));
-        }
-
+        uint wantBal = _stakedWantTokens();
         _withdraw(_wantAmt);
-        _wrapBNB(wantBal);
-
-        wantBal = IERC20(wantAddress).balanceOf(address(this)).sub(wantBal);
+        wantBal = wantBal.sub(_stakedWantTokens());
+        
+        if(isWbnb) {
+            _wrapBNB();
+        }
 
         IERC20(wantAddress).safeTransfer(owner(), wantBal);
 
-        balanceSnapshot = balanceSnapshot.sub(_wantAmt);
+        balanceSnapshot = balanceSnapshot.sub(wantBal);
 
         return wantBal;
     }
@@ -210,7 +215,7 @@ contract StrategyAlpacaSingle is Strategy {
         Vault(vaultAddress).withdraw(Vault(vaultAddress).balanceOf(address(this)));
     }
 
-    function _stakedWantTokens() internal view returns (uint256) {
+    function _stakedWantTokens() public view returns (uint256) {
         (uint256 _amount, , ,) = FairLaunch(fairLaunchAddress).userInfo(poolId, address(this));
         return _amount.mul(Vault(vaultAddress).totalToken()).div(Vault(vaultAddress).totalSupply());
     }
@@ -269,16 +274,17 @@ contract StrategyAlpacaSingle is Strategy {
         IERC20(_token).safeTransfer(_to, _amount);
     }
 
-    function _wrapBNB(uint256 _amount) internal {
-        if (address(this).balance >= _amount) {
-            IWBNB(wbnbAddress).deposit{value: _amount}();
+    function _wrapBNB() internal {
+        uint256 bnbBal = address(this).balance;
+        if (bnbBal > 0) {
+            IWBNB(wbnbAddress).deposit{value: bnbBal}();
         }
     }
 
-    function _unwrapBNB(uint256 _amount) internal {
+    function _unwrapBNB() internal {
         uint256 wbnbBal = IERC20(wbnbAddress).balanceOf(address(this));
-        if (wbnbBal >= _amount) {
-            IWBNB(wbnbAddress).withdraw(_amount);
+        if (wbnbBal > 0) {
+            IWBNB(wbnbAddress).withdraw(wbnbBal);
         }
     }
 

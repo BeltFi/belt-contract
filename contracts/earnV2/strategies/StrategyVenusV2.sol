@@ -27,13 +27,9 @@ contract StrategyVenusV2 is Strategy {
 
     address public BELTAddress;
 
-    uint256 public withdrawFeeRate = 1;
-    uint256 public constant withdrawFeeRateMax = 10000;
-    uint256 public constant withdrawFeeRateUL = 800;
 
     address[] public venusToWantPath;
     address[] public venusToBELTPath;
-    address[] public wantToBELTPath;
 
     uint256 public borrowRate = 585;
     uint256 public borrowDepth = 3;
@@ -46,9 +42,6 @@ contract StrategyVenusV2 is Strategy {
     uint256 public supplyBalTargeted = 0;
     uint256 public supplyBalMin = 0;
 
-	//only updated when deposit / withdraw / earn is called
-	uint256 public balanceSnapshot;
-
     event StratRebalance(uint256 _borrowRate, uint256 _borrowDepth);
 
     constructor(
@@ -58,8 +51,7 @@ contract StrategyVenusV2 is Strategy {
         address _uniRouterAddress,
 
         address[] memory _venusToWantPath,
-        address[] memory _venusToBELTPath,
-        address[] memory _wantToBETLPATH
+        address[] memory _venusToBELTPath
     ) public {
         govAddress = msg.sender;
         BELTAddress = _BELTAddress;
@@ -71,11 +63,13 @@ contract StrategyVenusV2 is Strategy {
 
         venusToWantPath = _venusToWantPath;
         venusToBELTPath = _venusToBELTPath;
-        wantToBELTPath = _wantToBETLPATH;
 
         vTokenAddress = _vTokenAddress;
         venusMarkets = [vTokenAddress];
         uniRouterAddress = _uniRouterAddress;
+
+        withdrawFeeNumer = 1;
+        withdrawFeeDenom = 10000;
 
         IERC20(venusAddress).safeApprove(uniRouterAddress, uint256(-1));
         IERC20(wantAddress).safeApprove(uniRouterAddress, uint256(-1));
@@ -131,7 +125,6 @@ contract StrategyVenusV2 is Strategy {
         _farm(true);
 
         uint diffBalance = wantLockedInHere().add(supplyBal).sub(borrowBal).sub(prevBalance);
-        balanceSnapshot.add(diffBalance);
 
         return diffBalance;
     }
@@ -254,12 +247,6 @@ contract StrategyVenusV2 is Strategy {
 
     function earn() override external whenNotPaused {
     	updateBalance();
-        uint256 wantBalance = wantLockedInHere().add(supplyBal).sub(borrowBal);
-        uint256 earnedWantAmt = 0;
-        if (wantBalance > balanceSnapshot){
-        	earnedWantAmt = wantBalance.sub(balanceSnapshot);
-        }
-
         IVenusDistribution(venusDistributionAddress).claimVenus(address(this));
 
         uint256 earnedAmt = IERC20(venusAddress).balanceOf(address(this));
@@ -275,53 +262,10 @@ contract StrategyVenusV2 is Strategy {
             );
         }
 
-        if(earnedWantAmt != 0){
-        	buyBackWant(earnedWantAmt);
-        }
 
 
         lastEarnBlock = block.number;
         _farm(false);
-
-        wantBalance = wantLockedInHere().add(supplyBal).sub(borrowBal);
-        if( wantBalance > balanceSnapshot ){
-        	balanceSnapshot = wantBalance;
-        }
-    }
-
-    function buyBackWant(uint256 _earnedWantAmt) internal returns (uint256) {
-        if (_earnedWantAmt == 0) {
-            return _earnedWantAmt;
-        }    	
-
-        uint256 buyBackAmt = _earnedWantAmt.mul(buyBackRate).div(buyBackRateMax);
-
-
-    	uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
-        if (wantBal < buyBackAmt) {
-            _deleverage(true, buyBackAmt);
-            if (wantIsWBNB) {
-                _wrapBNB();
-            }
-            wantBal = IERC20(wantAddress).balanceOf(address(this));
-        }
-
-        if (wantBal < buyBackAmt) {
-            buyBackAmt = wantBal;
-        }
-
-        IPancakeRouter02(uniRouterAddress).swapExactTokensForTokens(
-            buyBackAmt,
-            0,
-            wantToBELTPath,
-            address(this),
-            now + 600
-        );
-
-        uint256 burnAmt = IERC20(BELTAddress).balanceOf(address(this));
-        IERC20(BELTAddress).safeTransfer(buyBackAddress, burnAmt);
-
-        return _earnedWantAmt.sub(buyBackAmt);
     }
 
     function buyBack(uint256 _earnedAmt) internal returns (uint256) {
@@ -355,7 +299,9 @@ contract StrategyVenusV2 is Strategy {
     	updateBalance();
     	uint prevBalance = wantLockedInHere().add(supplyBal).sub(borrowBal);
 
-    	_wantAmt = _wantAmt.mul( withdrawFeeRateMax.sub(withdrawFeeRate) ).div(withdrawFeeRateMax);
+    	_wantAmt = _wantAmt.mul(
+            withdrawFeeDenom.sub(withdrawFeeNumer)
+        ).div(withdrawFeeDenom);
 
         uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
         if (wantBal < _wantAmt) {
@@ -375,7 +321,6 @@ contract StrategyVenusV2 is Strategy {
         _farm(true);
 
         uint diffBalance = prevBalance.sub(wantLockedInHere().add(supplyBal).sub(borrowBal));
-        balanceSnapshot = balanceSnapshot.sub(diffBalance);
         return _wantAmt;
     }
 
@@ -411,7 +356,11 @@ contract StrategyVenusV2 is Strategy {
     }
 
     function wantLockedTotal() override public view returns (uint256) {
-        return wantLockedInHere().add(balanceSnapshot);
+        return wantLockedInHere().add(
+            supplyBal
+        ).sub(
+            borrowBal
+        );
     }
 
     function wantLockedInHere() override public view returns (uint256) {
@@ -428,12 +377,6 @@ contract StrategyVenusV2 is Strategy {
         require(msg.sender == govAddress, "Not authorised");
         require(buyBackRate <= buyBackRateUL, "too high");
         buyBackRate = _buyBackRate;
-    }
-
-    function setWithdrawFeeRate(uint256 _withdrawFeeRate) public {
-        require(msg.sender == govAddress, "Not authorised");
-        require(withdrawFeeRate <= withdrawFeeRateUL, "too high");
-        withdrawFeeRate = _withdrawFeeRate;
     }
 
     function setGov(address _govAddress) override public {

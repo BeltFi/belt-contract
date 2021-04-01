@@ -6,7 +6,7 @@ import "../defi/acryptos.sol";
 import "../defi/pancake.sol";
 
 
-contract StratACryptoSingle is Strategy {
+contract StrategyACrypto is Strategy {
 
     uint256 public harvestFee;
 
@@ -99,10 +99,10 @@ contract StratACryptoSingle is Strategy {
         balanceSnapshot = balanceSnapshot.sub(_wantAmt);
 
         uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
-        _withdraw(_wantAmt);
+        _withdraw(_wantAmt);        
         wantBal = IERC20(wantAddress).balanceOf(address(this)).sub(wantBal);
         IERC20(wantAddress).safeTransfer(owner(), wantBal);
-
+        
         return wantBal;
     }
 
@@ -111,7 +111,7 @@ contract StratACryptoSingle is Strategy {
         ACryptoSVault(vaultAddress).withdraw(IERC20(vaultAddress).balanceOf(address(this)));
     }
 
-    function _stakedWantTokens() internal view returns (uint256) {
+    function _stakedWantTokens() public view returns (uint256) {
         (uint256 _amount, , ,) = ACryptoSFarm(acsFarmAddress).userInfo(vaultAddress, address(this));
         return _amount.mul(ACryptoSVault(vaultAddress).getPricePerFullShare()).div(1e18);
     }

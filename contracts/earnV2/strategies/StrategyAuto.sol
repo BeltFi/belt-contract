@@ -5,7 +5,7 @@ import "../defi/autoFarm.sol";
 import "../defi/pancake.sol";
 
 
-contract StrategyAUTOSingle is Strategy {
+contract StrategyAuto is Strategy {
     address immutable public wantAddress;
 
     address public uniRouterAddress;
@@ -21,7 +21,7 @@ contract StrategyAUTOSingle is Strategy {
     // only updated when deposit / withdraw / earn is called
     uint256 public balanceSnapshot;
 
-    // 1 = WBNB, 3 = BTCB, 4 = ETH
+    // 1 = WBNB, 2 = BUSD, 3 = BTCB, 4 = ETH
     uint256 public immutable poolId;
 
     address immutable public BELTAddress;

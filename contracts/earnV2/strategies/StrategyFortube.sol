@@ -11,10 +11,11 @@ interface IWBNB is IERC20 {
 }
 
 contract StrategyFortube is Strategy {
-    bool public wantIsWBNB = false;
+    bool public isWBNB = false;
     address public wantAddress;
     address public fTokenAddress;
     address public bankAddress;
+    address public bankControllerAddress;
     address[] public fortubeMarkets;
     address public uniRouterAddress;
 
@@ -25,16 +26,11 @@ contract StrategyFortube is Strategy {
     address public constant earnedAddress = forAddress;
     address public constant forDistributionAddress =
     0x55838F18e79cFd3EA22Eea08Bd3Ec18d67f314ed;
-
+    
     address public BELTAddress;
-
-    uint256 public withdrawFeeRate = 1;
-    uint256 public constant withdrawFeeRateMax = 10000;
-    uint256 public constant withdrawFeeRateUL = 800;
 
     address[] public forToWantPath;
     address[] public forToBELTPath;
-    address[] public wantToBELTPath;
 
     uint256 public borrowRate = 585;
     uint256 public borrowDepth = 3;
@@ -47,8 +43,6 @@ contract StrategyFortube is Strategy {
     uint256 public supplyBalTargeted = 0;
     uint256 public supplyBalMin = 0;
 
-	//only updated when deposit / withdraw / earn is called
-	uint256 public balanceSnapshot;
 
     event StratRebalance(uint256 _borrowRate, uint256 _borrowDepth);
 
@@ -57,11 +51,11 @@ contract StrategyFortube is Strategy {
         address _wantAddress,
         address _fTokenAddress,
         address _bankAddress,
+        address _bankControllerAddress,
         address _uniRouterAddress,
 
         address[] memory _forToWantPath,
-        address[] memory _forToBELTPath,
-        address[] memory _wantToBETLPATH
+        address[] memory _forToBELTPath
     ) public {
         govAddress = msg.sender;
         BELTAddress = _BELTAddress;
@@ -69,28 +63,30 @@ contract StrategyFortube is Strategy {
         bankAddress = _bankAddress;
 
         if (wantAddress == wbnbAddress) {
-            wantIsWBNB = true;
+            isWBNB = true;
         }
 
         forToWantPath = _forToWantPath;
         forToBELTPath = _forToBELTPath;
-        wantToBELTPath = _wantToBETLPATH;
+
+        bankControllerAddress = _bankControllerAddress;
 
         fTokenAddress = _fTokenAddress;
         fortubeMarkets = [fTokenAddress];
         uniRouterAddress = _uniRouterAddress;
 
+        withdrawFeeNumer = 1;
+        withdrawFeeDenom = 10000;
+
         IERC20(forAddress).safeApprove(uniRouterAddress, uint256(-1));
-        IERC20(wantAddress).safeApprove(uniRouterAddress, uint256(-1));
-        if (!wantIsWBNB) {
-            IERC20(wantAddress).safeApprove(fTokenAddress, uint256(-1));
-        }
+        IERC20(_wantAddress).safeApprove(uniRouterAddress, uint256(-1));
+        IERC20(_wantAddress).safeApprove(bankControllerAddress, uint256(-1));
 
         // IMiningReward(forDistributionAddress).enterMarkets(venusMarkets);
     }
 
     function _supply(uint256 _amount) internal {
-        if (wantIsWBNB) {
+        if (isWBNB) {
             IBank(bankAddress).deposit{value: _amount}(0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB, _amount);
         } else {
             IBank(bankAddress).deposit(wantAddress, _amount);
@@ -106,7 +102,7 @@ contract StrategyFortube is Strategy {
     }
 
     function _repayBorrow(uint256 _amount) internal {
-        if (wantIsWBNB) {
+        if (isWBNB) {
             IBank(bankAddress).repay{value: _amount}(0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB, _amount);
         } else {
             IBank(bankAddress).repay(wantAddress, _amount);
@@ -134,8 +130,6 @@ contract StrategyFortube is Strategy {
         _farm(true);
 
         uint diffBalance = wantLockedInHere().add(supplyBal).sub(borrowBal).sub(prevBalance);
-        balanceSnapshot.add(diffBalance);
-
         return diffBalance;
     }
 
@@ -145,7 +139,7 @@ contract StrategyFortube is Strategy {
 
     function _farm(bool _withLev) internal {
         if(wantLockedInHere() > 1e18){
-            if (wantIsWBNB) {
+            if (isWBNB) {
                 _unwrapBNB();
                 _leverage(address(this).balance, _withLev);
             } else {
@@ -153,7 +147,7 @@ contract StrategyFortube is Strategy {
             }
         }
         else{
-            if (wantIsWBNB) {
+            if (isWBNB) {
                 _unwrapBNB();
                 _leverage(address(this).balance, false);
             } else {
@@ -187,7 +181,7 @@ contract StrategyFortube is Strategy {
             _removeSupply(supplyBal.sub(supplyBalTargeted));
         }
 
-        if (wantIsWBNB) {
+        if (isWBNB) {
             _unwrapBNB();
             _repayBorrow(address(this).balance);
         } else {
@@ -209,7 +203,7 @@ contract StrategyFortube is Strategy {
 
         deleverageUntilNotOverLevered();
 
-        if (wantIsWBNB) {
+        if (isWBNB) {
             _wrapBNB();
         }
 
@@ -257,74 +251,25 @@ contract StrategyFortube is Strategy {
 
     function earn() override external whenNotPaused {
     	updateBalance();
-        uint256 wantBalance = wantLockedInHere().add(supplyBal).sub(borrowBal);
-        uint256 earnedWantAmt = 0;
-        if (wantBalance > balanceSnapshot){
-        	earnedWantAmt = wantBalance.sub(balanceSnapshot);
-        }
+        if (IMiningReward(forDistributionAddress).checkBalance(address(this)) > 0) {
+            IMiningReward(forDistributionAddress).claimReward();
 
-        IMiningReward(forDistributionAddress).claimReward();
+            uint256 earnedAmt = IERC20(forAddress).balanceOf(address(this));
+            earnedAmt = buyBack(earnedAmt);
 
-        uint256 earnedAmt = IERC20(forAddress).balanceOf(address(this));
-        earnedAmt = buyBack(earnedAmt);
-
-        if (forAddress != wantAddress) {
-            IPancakeRouter02(uniRouterAddress).swapExactTokensForTokens(
-                earnedAmt,
-                0,
-                forToWantPath,
-                address(this),
-                now.add(600)
-            );
-        }
-
-        if(earnedWantAmt != 0){
-        	buyBackWant(earnedWantAmt);
-        }
-
-
-        lastEarnBlock = block.number;
-        _farm(false);
-
-        wantBalance = wantLockedInHere().add(supplyBal).sub(borrowBal);
-        if( wantBalance > balanceSnapshot ){
-        	balanceSnapshot = wantBalance;
-        }
-    }
-
-    function buyBackWant(uint256 _earnedWantAmt) internal returns (uint256) {
-        if (_earnedWantAmt == 0) {
-            return _earnedWantAmt;
-        }    	
-
-        uint256 buyBackAmt = _earnedWantAmt.mul(buyBackRate).div(buyBackRateMax);
-
-
-    	uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
-        if (wantBal < buyBackAmt) {
-            _deleverage(true, buyBackAmt);
-            if (wantIsWBNB) {
-                _wrapBNB();
+            if (forAddress != wantAddress) {
+                IPancakeRouter02(uniRouterAddress).swapExactTokensForTokens(
+                    earnedAmt,
+                    0,
+                    forToWantPath,
+                    address(this),
+                    now.add(600)
+                );
             }
-            wantBal = IERC20(wantAddress).balanceOf(address(this));
+
+            lastEarnBlock = block.number;
+            _farm(false);
         }
-
-        if (wantBal < buyBackAmt) {
-            buyBackAmt = wantBal;
-        }
-
-        IPancakeRouter02(uniRouterAddress).swapExactTokensForTokens(
-            buyBackAmt,
-            0,
-            wantToBELTPath,
-            address(this),
-            now + 600
-        );
-
-        uint256 burnAmt = IERC20(BELTAddress).balanceOf(address(this));
-        IERC20(BELTAddress).safeTransfer(buyBackAddress, burnAmt);
-
-        return _earnedWantAmt.sub(buyBackAmt);
     }
 
     function buyBack(uint256 _earnedAmt) internal returns (uint256) {
@@ -358,12 +303,14 @@ contract StrategyFortube is Strategy {
     	updateBalance();
     	uint prevBalance = wantLockedInHere().add(supplyBal).sub(borrowBal);
 
-    	_wantAmt = _wantAmt.mul( withdrawFeeRateMax.sub(withdrawFeeRate) ).div(withdrawFeeRateMax);
+    	_wantAmt = _wantAmt.mul(
+            withdrawFeeDenom.sub(withdrawFeeNumer)
+        ).div(withdrawFeeDenom);
 
         uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
         if (wantBal < _wantAmt) {
             _deleverage(true, _wantAmt);
-            if (wantIsWBNB) {
+            if (isWBNB) {
                 _wrapBNB();
             }
             wantBal = IERC20(wantAddress).balanceOf(address(this));
@@ -378,8 +325,6 @@ contract StrategyFortube is Strategy {
         _farm(true);
 
         uint diffBalance = prevBalance.sub(wantLockedInHere().add(supplyBal).sub(borrowBal));
-        balanceSnapshot = balanceSnapshot.sub(diffBalance);
-
         return _wantAmt;
     }
 
@@ -390,10 +335,7 @@ contract StrategyFortube is Strategy {
 
         IERC20(forAddress).safeApprove(uniRouterAddress, 0);
         IERC20(wantAddress).safeApprove(uniRouterAddress, 0);
-        if (!wantIsWBNB) {
-            IERC20(wantAddress).safeApprove(bankAddress, 0);
-            IERC20(fTokenAddress).safeApprove(bankAddress, 0);
-        }
+        IERC20(wantAddress).safeApprove(bankControllerAddress, 0);
     }
 
     function unpause() external {
@@ -402,27 +344,24 @@ contract StrategyFortube is Strategy {
 
         IERC20(forAddress).safeApprove(uniRouterAddress, uint256(-1));
         IERC20(wantAddress).safeApprove(uniRouterAddress, uint256(-1));
-        if (!wantIsWBNB) {
-            IERC20(wantAddress).safeApprove(bankAddress, uint256(-1));
-            IERC20(fTokenAddress).safeApprove(bankAddress, uint256(-1));
-        }
+        IERC20(wantAddress).safeApprove(bankControllerAddress, uint256(-1));
     }
 
 
     function updateBalance() public {
-        supplyBal = IFToken(fTokenAddress).balanceOfUnderlying(address(this));
-        borrowBal = IFToken(fTokenAddress).borrowBalanceCurrent(address(this));
+        supplyBal = IFToken(fTokenAddress).calcBalanceOfUnderlying(address(this));
+        borrowBal = IFToken(fTokenAddress).borrowBalanceStored(address(this));
         supplyBalTargeted = borrowBal.mul(1000).div(borrowRate);
         supplyBalMin = borrowBal.mul(1000).div(BORROW_RATE_MAX_HARD);
     }
 
     function wantLockedTotal() override public view returns (uint256) {
-        return wantLockedInHere().add(balanceSnapshot);
+        return wantLockedInHere().add(supplyBal).sub(borrowBal);
     }
 
     function wantLockedInHere() override public view returns (uint256) {
         uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
-        if (wantIsWBNB) {
+        if (isWBNB) {
             uint256 bnbBal = address(this).balance;
             return bnbBal.add(wantBal);
         } else {
@@ -434,12 +373,6 @@ contract StrategyFortube is Strategy {
         require(msg.sender == govAddress, "Not authorised");
         require(buyBackRate <= buyBackRateUL, "too high");
         buyBackRate = _buyBackRate;
-    }
-
-    function setWithdrawFeeRate(uint256 _withdrawFeeRate) public {
-        require(msg.sender == govAddress, "Not authorised");
-        require(withdrawFeeRate <= withdrawFeeRateUL, "too high");
-        withdrawFeeRate = _withdrawFeeRate;
     }
 
     function setGov(address _govAddress) override public {
@@ -476,7 +409,7 @@ contract StrategyFortube is Strategy {
 
     function wrapBNB() public {
         require(msg.sender == govAddress, "Not authorised");
-        require(wantIsWBNB, "!wantIsWBNB");
+        require(isWBNB, "!isWBNB");
         _wrapBNB();
     }
 

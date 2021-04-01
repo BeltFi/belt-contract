@@ -11,15 +11,6 @@ interface IWBNB is IERC20 {
 
 contract MultiStrategyToken is StrategyToken {
 
-    enum Lender {
-        AUTOFARM,
-        ACRYPTOS,
-        ALPHAHOMORA,
-        FORTUBE,
-        VENUS,
-        NONE
-    }
-
     address public constant wbnbAddress =
     0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
 
@@ -39,70 +30,35 @@ contract MultiStrategyToken is StrategyToken {
 
     uint256 public rebalanceThresholdDenom;
 
-    // btokenAddrs
-    address public bAcryptos;
-    address public bAutoFarm;
-    address public bFortube;
-    address public bAlphaHomora;
-    address public bVenus;
-
     constructor (
         string memory name_,
         string memory symbol_,
         address _token,
-        address _autoFarm,
-        address _acryptos,
-        address _alphaHomora,
-        address _fortube,
-        address _venus
+        address[] memory _strategies
     ) public ERC20(name_, symbol_) {
+        // AUTOFARM
+        // ACRYPTOS
+        // ALPHAHOMORA
+        // FORTUBE
+        // VENUS
+        // ELLIPSIS
+        // ALPACA
+        
         govAddress = msg.sender;
 
         token = _token;
-        strategies.push(_autoFarm);
-        isActive[_autoFarm] = true;
 
-        strategies.push(_acryptos);
-        isActive[_acryptos] = true;
-
-        strategies.push(_alphaHomora);
-        isActive[_alphaHomora] = true;
-
-        strategies.push(_fortube);
-        isActive[_fortube] = true;
-
-        strategies.push(_venus);
-        isActive[_venus] = true;
-
+        strategies = _strategies;
+        uint256 i;
+        for (i = 0; i < strategies.length; i += 1) {
+            isActive[strategies[i]] = true;
+        }
         activeCount = strategies.length;
 
-        // active except Ledner.NONE - 1;
-        strategies.push(address(0));
-        
-
-        bAutoFarm = _autoFarm;
-        bAcryptos = _acryptos;
-        bAlphaHomora = _alphaHomora;
-        bFortube = _fortube;
-        bVenus = _venus;
-
-
-        
-        ratios[_autoFarm] = 1;
-        ratios[_acryptos] = 1;
-        ratios[_alphaHomora] = 1;
-        ratios[_fortube] = 1;
-        ratios[_venus] = 1;
-
-        ratioTotal = ratios[_autoFarm].add(
-            ratios[_acryptos]
-        ).add(
-            ratios[_alphaHomora]
-        ).add(
-            ratios[_fortube]
-        ).add(
-            ratios[_venus]
-        );
+        for (i = 0; i < strategies.length; i += 1) {
+            ratios[strategies[i]] = 1;
+            ratioTotal = ratioTotal.add(ratios[strategies[i]]);
+        }
 
         entranceFeeNumer = 0;
         entranceFeeDenom = 1;
@@ -111,7 +67,7 @@ contract MultiStrategyToken is StrategyToken {
         rebalanceThresholdDenom = 100;
 
         isWbnb = token == wbnbAddress;
-        
+    
         approveToken();
     }
 
@@ -143,7 +99,7 @@ contract MultiStrategyToken is StrategyToken {
         
         uint256 sharesToMint = calcPoolValueInToken().sub(_pool);
         if (totalSupply() != 0 && _pool != 0) {
-            sharesToMint = (sharesToMint.mul(totalSupply()))
+            sharesToMint = sharesToMint.mul(totalSupply())
                 .div(_pool);
         }
         require(sharesToMint >= _minShares);
@@ -180,7 +136,7 @@ contract MultiStrategyToken is StrategyToken {
 
         uint256 pool = calcPoolValueInToken();
 
-        uint256 r = (pool.mul(_shares)).div(totalSupply());
+        uint256 r = pool.mul(_shares).div(totalSupply());
         _burn(msg.sender, _shares);
 
         address strategyToWithdraw;
@@ -218,10 +174,8 @@ contract MultiStrategyToken is StrategyToken {
         uint256 optimal = totalBalance.mul(ratios[strategyToWithdraw]).div(ratioTotal);
 
         uint256 threshold = optimal.mul(
-            rebalanceThresholdDenom.add(
                 rebalanceThresholdNumer
-            ).div(rebalanceThresholdDenom)
-        );
+        ).div(rebalanceThresholdDenom);
 
         if (strategyAvailableAmount != 0 && threshold < strategyAvailableAmount) {
             uint256 _pool = StrategyToken(strategyToWithdraw).calcPoolValueInToken();
@@ -245,7 +199,7 @@ contract MultiStrategyToken is StrategyToken {
         address overLockedStrategy = strats[0];
 
         uint256 optimal = totalBalance.mul(ratios[strats[0]]).div(ratioTotal);
-        uint256 current = StrategyToken(strats[0]).calcPoolValueInToken();   
+        uint256 current = getBalanceOfOneStrategy(strats[0]);   
         
         bool isLessThanOpt = current < optimal;
         uint256 overLockedBalance = isLessThanOpt ? optimal.sub(current) : current.sub(optimal);
@@ -253,7 +207,7 @@ contract MultiStrategyToken is StrategyToken {
         uint256 i = 1;
         for (; i < strats.length; i += 1) {
             optimal = totalBalance.mul(ratios[strats[i]]).div(ratioTotal);
-            current = StrategyToken(strats[i]).calcPoolValueInToken(); 
+            current = getBalanceOfOneStrategy(strats[i]); 
             if (isLessThanOpt && current >= optimal) {
                 isLessThanOpt = false;
                 overLockedBalance = current.sub(optimal);
@@ -283,11 +237,11 @@ contract MultiStrategyToken is StrategyToken {
 
         uint256 current;
         address lockedMostAddr = strats[0];
-        uint256 lockedBalance = StrategyToken(strats[0]).calcPoolValueInToken();
+        uint256 lockedBalance = getBalanceOfOneStrategy(strats[0]);
 
         uint256 i = 1;
         for (; i < strats.length; i += 1) {
-            current = StrategyToken(strats[i]).calcPoolValueInToken(); 
+            current = getBalanceOfOneStrategy(strats[i]); 
             if (current > lockedBalance) {
                 lockedBalance = current;
                 lockedMostAddr = strats[i];
@@ -305,7 +259,7 @@ contract MultiStrategyToken is StrategyToken {
         address insuffStrategy = strats[0];
 
         uint256 optimal = totalBalance.mul(ratios[strats[0]]).div(ratioTotal);
-        uint256 current = StrategyToken(strats[0]).calcPoolValueInToken();   
+        uint256 current = getBalanceOfOneStrategy(strats[0]);
         
         bool isGreaterThanOpt = current > optimal;
         uint256 insuffBalance = isGreaterThanOpt ? current.sub(optimal) : optimal.sub(current);
@@ -313,7 +267,7 @@ contract MultiStrategyToken is StrategyToken {
         uint256 i = 1;
         for (; i < strats.length; i += 1) {
             optimal = totalBalance.mul(ratios[strats[i]]).div(ratioTotal);
-            current = StrategyToken(strats[i]).calcPoolValueInToken(); 
+            current = getBalanceOfOneStrategy(strats[i]); 
             if (isGreaterThanOpt && current < optimal) {
                 isGreaterThanOpt = false;
                 insuffBalance = optimal.sub(current);
@@ -340,31 +294,33 @@ contract MultiStrategyToken is StrategyToken {
 
     function approveToken() public {
         uint i = 0;
-        for (; i < uint(Lender.NONE); i += 1) {
+        for (; i < strategies.length; i += 1) {
             IERC20(token).safeApprove(strategies[i], uint(-1));   
         }
-        // IERC20(token).safeApprove(bAutoFarm, uint(-1));
-        // IERC20(token).safeApprove(bAcryptos, uint(-1));
-        // IERC20(token).safeApprove(bAlphaHomora, uint(-1));
-        // IERC20(token).safeApprove(bFortube, uint(-1));
-        // IERC20(token).safeApprove(bVenus, uint(-1));
     }
 
     function balance() override public view returns (uint256) {
         return IERC20(token).balanceOf(address(this));
     }
 
+    function getBalanceOfOneStrategy(address strategyAddress) public view returns (uint256 bal) {
+            StrategyToken stToken = StrategyToken(strategyAddress);
+            if (stToken.balanceOf(address(this)) != 0) {
+                bal = stToken.calcPoolValueInToken().mul(
+                    stToken.balanceOf(address(this))
+                ).div(
+                    stToken.totalSupply()
+                );
+            } else {
+                bal = 0;
+            }
+    }
+
     function balanceStrategy() override public view returns (uint256) {
         uint i = 0;
         uint sum = 0;
-        StrategyToken stToken;
-        for (; i < uint(Lender.NONE); i += 1) {
-            stToken = StrategyToken(strategies[i]);
-            sum = sum.add(stToken.calcPoolValueInToken().mul(
-                stToken.balanceOf(address(this))
-            ).div(
-                stToken.totalSupply()
-            ));
+        for (; i < strategies.length; i += 1) {
+            sum = sum.add(getBalanceOfOneStrategy(strategies[i]));
         }
         return sum;
     }
@@ -374,7 +330,7 @@ contract MultiStrategyToken is StrategyToken {
         address[] memory addrArr = new address[](activeCount);
         uint256 i = 0;
         uint256 cnt = 0;
-        for (; i < uint256(Lender.NONE); i += 1) {
+        for (; i < strategies.length; i += 1) {
             if (isActive[strategies[i]]) {
                 addrArr[cnt] = strategies[i];
                 cnt += 1;
@@ -394,10 +350,18 @@ contract MultiStrategyToken is StrategyToken {
 
     function changeRatio(uint256 index, uint256 value) external onlyOwner {
         // require(index != 0);
-        require(uint256(Lender.NONE) > index);
+        require(strategies.length > index);
         uint256 valueBefore = ratios[strategies[index]];
         ratios[strategies[index]] = value;    
         ratioTotal = ratioTotal.sub(valueBefore).add(value);
+    }
+
+    // doesn't guarantee that withdrawing shares returned by this function will always be successful.
+    function getMaxWithdrawableShares() public view returns (uint256) {
+        require(totalSupply() > 0);
+        uint256 bal;
+        (, bal) = findMostLockedStrategy();
+        return amountToShares(bal);
     }
 
     function sharesToAmount(uint256 _shares) override public view returns (uint256) {
@@ -436,7 +400,7 @@ contract MultiStrategyToken is StrategyToken {
 
     function setStrategyActive(uint256 index, bool b) public {
         require(msg.sender == govAddress);
-        require(index < uint256(Lender.NONE));
+        require(index < strategies.length);
         require(isActive[strategies[index]] != b);
         activeCount = b ? activeCount.add(1) : activeCount.sub(1);
         isActive[strategies[index]] = b;

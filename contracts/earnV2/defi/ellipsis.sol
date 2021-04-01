@@ -10,6 +10,14 @@ pragma solidity 0.6.12;
 // 3eps
 // 0xaF4dE8E872131AE328Ce21D909C74705d3Aaf452
 
+// eps
+// 0xA7f552078dcC247C2684336020c03648500C6d9F
+
+// eps swap route
+// -> eps busd
+
+// eps to belt route
+// -> eps busd wbnb belt
 
 interface StableSwap {
 

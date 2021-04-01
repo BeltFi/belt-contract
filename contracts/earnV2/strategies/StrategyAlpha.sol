@@ -11,7 +11,7 @@ interface IWBNB is IERC20 {
 }
 
 
-contract StratAlphaSingle is Strategy {
+contract StrategyAlpha is Strategy {
 
     address public pancakeRouterAddress;
 
@@ -93,11 +93,11 @@ contract StratAlphaSingle is Strategy {
     {
         _wantAmt = _wantAmt.mul(withdrawFeeDenom.sub(withdrawFeeNumer)).div(withdrawFeeDenom);
 
-        uint amount = _wantAmt.mul(IERC20(bankAddress).totalSupply()).div(Bank(bankAddress).totalBNB());
-        uint256 wantBal = address(this).balance;
+        uint256 wantBal = _stakedWantTokens();
+        uint256 amount = _wantAmt.mul(IERC20(bankAddress).totalSupply()).div(Bank(bankAddress).totalBNB());      
         Bank(bankAddress).withdraw(amount);
+        wantBal = wantBal.sub(_stakedWantTokens());
 
-        wantBal = address(this).balance.sub(wantBal);
         _wrapBNB(wantBal);
         IERC20(wantAddress).safeTransfer(owner(), wantBal);
         
@@ -106,7 +106,7 @@ contract StratAlphaSingle is Strategy {
         return wantBal;
     }
 
-    function _stakedWantTokens() internal view returns (uint256) {
+    function _stakedWantTokens() public view returns (uint256) {
         IERC20 _token = IERC20(bankAddress);
         uint _totalBNB = Bank(bankAddress).totalBNB();
         return _token.balanceOf(address(this)).mul(_totalBNB).div(_token.totalSupply());
@@ -149,7 +149,7 @@ contract StratAlphaSingle is Strategy {
     function buyBackWant(uint256 _earnedAmt) internal {
         if (buyBackRate != 0) {
             uint256 buyBackAmt = _earnedAmt.mul(buyBackRate).div(buyBackRateMax);
-            uint256 curWantBal = IERC20(wantAddress).balanceOf(address(this));
+            uint256 curWantBal = address(this).balance;
             
             if(curWantBal < buyBackAmt) {
                 uint amount = (buyBackAmt.sub(curWantBal)).mul(IERC20(bankAddress).totalSupply()).div(Bank(bankAddress).totalBNB());
