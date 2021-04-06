@@ -32,7 +32,7 @@ contract SingleStrategyToken is StrategyToken {
     }
 
     function depositBNB(uint256 _minShares) external payable {
-        require(isWbnb);
+        require(isWbnb, "not bnb");
         require(msg.value != 0, "deposit must be greater than 0");
         _deposit(msg.value, _minShares);
         _wrapBNB(msg.value);
@@ -46,7 +46,7 @@ contract SingleStrategyToken is StrategyToken {
 
     function _deposit(uint256 _amount, uint256 _minShares) internal nonReentrant {
         uint256 shares = amountToShares(_amount);
-        require(shares >= _minShares);
+        require(shares >= _minShares, "did not meet minimum shares requested");
         _mint(msg.sender, shares);
     }
 
@@ -56,7 +56,7 @@ contract SingleStrategyToken is StrategyToken {
     }
 
     function withdrawBNB(uint256 _shares, uint256 _minAmount) external {
-        require(isWbnb);
+        require(isWbnb, "not bnb");
         uint256 r = _withdraw(_shares, _minAmount);
         _unwrapBNB(r);
         msg.sender.transfer(r);
@@ -82,7 +82,7 @@ contract SingleStrategyToken is StrategyToken {
             r = balance();
         }
 
-        require(r >= _minAmount);
+        require(r >= _minAmount, "did not meet minimum amount requested");
         
         return r;
     }
@@ -102,7 +102,7 @@ contract SingleStrategyToken is StrategyToken {
     function supplyStrategy() public {
         uint256 before = balance();
         uint256 supplied = Strategy(strategy).deposit(balance());
-        require(supplied >= before.mul(entranceFeeDenom.sub(entranceFeeNumer)).div(entranceFeeDenom));
+        require(supplied >= before.mul(entranceFeeDenom.sub(entranceFeeNumer)).div(entranceFeeDenom), "Amount supplied too small");
     }
 
     function calcPoolValueInToken() override public view returns (uint) {
@@ -144,8 +144,8 @@ contract SingleStrategyToken is StrategyToken {
 
     function setEntranceFee(uint256 _entranceFeeNumer, uint256 _entranceFeeDenom) override external {
         require(msg.sender == govAddress, "Not authorized");
-        require(_entranceFeeDenom != 0);
-        require(_entranceFeeNumer.mul(10) <= _entranceFeeDenom);
+        require(_entranceFeeDenom != 0, "denominator should not be 0");
+        require(_entranceFeeNumer.mul(10) <= _entranceFeeDenom, "numerator value too big");
         entranceFeeNumer = _entranceFeeNumer;
         entranceFeeDenom = _entranceFeeDenom;
     }

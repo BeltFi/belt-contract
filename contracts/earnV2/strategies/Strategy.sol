@@ -54,8 +54,8 @@ abstract contract Strategy is Ownable, ReentrancyGuard, Pausable {
 
     function setWithdrawFee(uint256 _withdrawFeeNumer, uint256 _withdrawFeeDenom) virtual external {
         require(msg.sender == govAddress, "Not authorised");
-        require(_withdrawFeeDenom != 0);
-        require(_withdrawFeeNumer.mul(10) <= _withdrawFeeDenom, "too high");
+        require(_withdrawFeeDenom != 0, "denominator should not be 0");
+        require(_withdrawFeeNumer.mul(10) <= _withdrawFeeDenom, "numerator value too big");
         withdrawFeeDenom = _withdrawFeeDenom;
         withdrawFeeNumer = _withdrawFeeNumer;
     }

@@ -32,7 +32,7 @@ contract SingleStrategyToken2 is StrategyToken {
     }
 
     function depositBnb(uint256 _minShares) external payable {
-        require(isWbnb);
+        require(isWbnb, "not bnb");
         require(msg.value != 0, "deposit must be greater than 0");
         _wrapBNB(msg.value);
         _deposit(msg.value, _minShares);
@@ -51,7 +51,7 @@ contract SingleStrategyToken2 is StrategyToken {
             sharesToMint = (sharesToMint.mul(totalSupply()))
             .div(_pool);
         }
-        require(sharesToMint >= _minShares);
+        require(sharesToMint >= _minShares, "did not meet minimum shares requested");
         _mint(msg.sender, sharesToMint);
     }
 
@@ -61,7 +61,7 @@ contract SingleStrategyToken2 is StrategyToken {
     }
 
     function withdrawBNB(uint256 _shares, uint256 _minAmount) external {
-        require(isWbnb);
+        require(isWbnb, "not bnb");
         uint256 r = _withdraw(_shares, _minAmount);
         _unwrapBNB(r);
         msg.sender.transfer(r);
@@ -82,7 +82,7 @@ contract SingleStrategyToken2 is StrategyToken {
 
         r = Strategy(strategy).withdraw(r);
 
-        require(r >= _minAmount);
+        require(r >= _minAmount, "did not meet minimum amount requested");
         
         return r;
     }
@@ -159,10 +159,10 @@ contract SingleStrategyToken2 is StrategyToken {
         require(msg.sender == govAddress, "!gov");
         require(_token != address(this), "!safe");
         if (_token == address(0)) {
-            require(address(this).balance >= _amount);
+            require(address(this).balance >= _amount, "amount greater than holding");
             _wrapBNB(_amount);
         } else if (_token == token) { 
-            require(balance() >= _amount);
+            require(balance() >= _amount, "amount greater than holding");
         }
         IERC20(_token).safeTransfer(_to, _amount);
     }

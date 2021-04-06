@@ -46,7 +46,6 @@ contract StrategyACrypto is Strategy {
         BELTAddress = _BELTAddress;
 
         wantAddress = _wantAddress;
-        require(wantAddress != wbnbAddress);
 
         ACSToWantPath = _ACSToWantPath;
         ACSToBELTPath = _ACSToBELTPath;
@@ -97,6 +96,10 @@ contract StrategyACrypto is Strategy {
     {
         _wantAmt = _wantAmt.mul(withdrawFeeDenom.sub(withdrawFeeNumer)).div(withdrawFeeDenom);
         balanceSnapshot = balanceSnapshot.sub(_wantAmt);
+        
+        if(_stakedWantTokens() < _wantAmt) {
+            _wantAmt = _stakedWantTokens();
+        }
 
         uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
         _withdraw(_wantAmt);        

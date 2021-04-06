@@ -21,7 +21,7 @@ contract StrategyAuto is Strategy {
     // only updated when deposit / withdraw / earn is called
     uint256 public balanceSnapshot;
 
-    // 1 = WBNB, 2 = BUSD, 3 = BTCB, 4 = ETH
+    // 1 = WBNB, 2 = BUSD, 3 = BTCB, 4 = ETH, 16 = USDT, 17 = USDC
     uint256 public immutable poolId;
 
     address immutable public BELTAddress;

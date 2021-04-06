@@ -193,18 +193,30 @@ contract StrategyAlpaca is Strategy {
         returns (uint256)
     {
         _wantAmt = _wantAmt.mul(withdrawFeeDenom.sub(withdrawFeeNumer)).div(withdrawFeeDenom);
-
-        uint wantBal = _stakedWantTokens();
-        _withdraw(_wantAmt);
-        wantBal = wantBal.sub(_stakedWantTokens());
         
+        uint wantBal;
+        uint256 lockedAmt = wantLockedInHere();
+        uint256 diff = _stakedWantTokens();
+
+        if(_wantAmt > wantLockedInHere()) {
+            _withdraw(_wantAmt.sub(
+                wantLockedInHere()
+            ));
+            diff = diff.sub(
+                _stakedWantTokens()
+            );
+            wantBal = lockedAmt.add(diff);
+        } else {
+            wantBal = _wantAmt;
+        }
+
         if(isWbnb) {
             _wrapBNB();
         }
 
         IERC20(wantAddress).safeTransfer(owner(), wantBal);
 
-        balanceSnapshot = balanceSnapshot.sub(wantBal);
+        balanceSnapshot = balanceSnapshot.sub(diff);
 
         return wantBal;
     }

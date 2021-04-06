@@ -14,8 +14,6 @@ contract StrategyFortube is Strategy {
     bool public isWBNB = false;
     address public wantAddress;
     address public fTokenAddress;
-    address public bankAddress;
-    address public bankControllerAddress;
     address[] public fortubeMarkets;
     address public uniRouterAddress;
 
@@ -26,7 +24,11 @@ contract StrategyFortube is Strategy {
     address public constant earnedAddress = forAddress;
     address public constant forDistributionAddress =
     0x55838F18e79cFd3EA22Eea08Bd3Ec18d67f314ed;
-    
+    address public constant bankAddress =
+    0x0cEA0832e9cdBb5D476040D58Ea07ecfbeBB7672;
+    address public constant bankControllerAddress =
+    0xc78248D676DeBB4597e88071D3d889eCA70E5469;
+
     address public BELTAddress;
 
     address[] public forToWantPath;
@@ -50,8 +52,6 @@ contract StrategyFortube is Strategy {
         address _BELTAddress,
         address _wantAddress,
         address _fTokenAddress,
-        address _bankAddress,
-        address _bankControllerAddress,
         address _uniRouterAddress,
 
         address[] memory _forToWantPath,
@@ -60,7 +60,6 @@ contract StrategyFortube is Strategy {
         govAddress = msg.sender;
         BELTAddress = _BELTAddress;
         wantAddress = _wantAddress;
-        bankAddress = _bankAddress;
 
         if (wantAddress == wbnbAddress) {
             isWBNB = true;
@@ -69,7 +68,6 @@ contract StrategyFortube is Strategy {
         forToWantPath = _forToWantPath;
         forToBELTPath = _forToBELTPath;
 
-        bankControllerAddress = _bankControllerAddress;
 
         fTokenAddress = _fTokenAddress;
         fortubeMarkets = [fTokenAddress];
@@ -94,11 +92,19 @@ contract StrategyFortube is Strategy {
     }
 
     function _removeSupply(uint256 _amount) internal {
-        IBank(bankAddress).withdrawUnderlying(wantAddress, _amount);
+        if (isWBNB) {
+            IBank(bankAddress).withdrawUnderlying(0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB, _amount);
+        } else {
+            IBank(bankAddress).withdrawUnderlying(wantAddress, _amount);
+        }
     }
 
     function _borrow(uint256 _amount) internal {
-        IBank(bankAddress).borrow(wantAddress, _amount);
+        if (isWBNB) {
+            IBank(bankAddress).borrow(0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB, _amount);
+        } else {
+            IBank(bankAddress).borrow(wantAddress, _amount);
+        }
     }
 
     function _repayBorrow(uint256 _amount) internal {
