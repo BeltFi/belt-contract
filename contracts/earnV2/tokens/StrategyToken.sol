@@ -23,14 +23,40 @@ abstract contract StrategyToken is ERC20, ReentrancyGuard, Ownable {
 
     uint256 public entranceFeeDenom;
 
-    // constructor (string memory name_, string memory symbol_) public ERC20(name_, symbol_) {}
+    bool public depositPaused;
 
+    bool public withdrawPaused;
+    
     // deposit tokens to this minter and receive shares
     // tokens deposited this way remains in this contract until supplyStrategy is called
     function deposit(uint256 _amount, uint256 _minShares) virtual external;
 
+    function pauseDeposit() external virtual {
+        require(!depositPaused, "deposit paused");
+        require(msg.sender == govAddress, "Not authorized");
+        depositPaused = true;
+    }
+
+    function unpauseDeposit() external virtual {
+        require(depositPaused, "deposit not paused");
+        require(msg.sender == govAddress, "Not authorized");
+        depositPaused = false;
+    }
+
     // return shares and receive tokens from strategy
     function withdraw(uint256 _shares, uint256 _minAmount) virtual external;
+
+    function pauseWithdraw() external virtual {
+        require(!withdrawPaused, "withdraw paused");
+        require(msg.sender == govAddress, "Not authorized");
+        withdrawPaused = true;
+    }
+
+    function unpauseWithdraw() external virtual {
+        require(withdrawPaused, "withdraw not paused");
+        require(msg.sender == govAddress, "Not authorized");
+        withdrawPaused = false;
+    }
 
     // balance of tokens that this contract is holding
     function balance() virtual public view returns (uint256);
@@ -50,7 +76,10 @@ abstract contract StrategyToken is ERC20, ReentrancyGuard, Ownable {
     // convert the amount of tokens to shares
     function amountToShares(uint256 _amount) virtual public view returns (uint256);
 
-    function setGovAddress(address _govAddress) virtual public;
+    function setGovAddress(address _govAddress) virtual external {
+        require(msg.sender == govAddress, "Not authorized");
+        govAddress = _govAddress;
+    }
 
     function setEntranceFee(uint256 _entranceFeeNumer, uint256 _entranceFeeDenom) virtual external;
 }

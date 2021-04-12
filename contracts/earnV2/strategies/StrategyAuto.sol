@@ -21,7 +21,7 @@ contract StrategyAuto is Strategy {
     // only updated when deposit / withdraw / earn is called
     uint256 public balanceSnapshot;
 
-    // 1 = WBNB, 2 = BUSD, 3 = BTCB, 4 = ETH, 16 = USDT, 17 = USDC
+    //wbnb 84, busd 85, usdt 86, usdc 87, btcb 89, eth 90
     uint256 public immutable poolId;
 
     address immutable public BELTAddress;
@@ -51,6 +51,9 @@ contract StrategyAuto is Strategy {
         wantToBELTPath = _wantToBETLPATH;
 
         uniRouterAddress = _uniRouterAddress;
+
+        withdrawFeeNumer = 1;
+        withdrawFeeDenom = 1000;
 
         IERC20(autoAddress).safeApprove(uniRouterAddress, uint256(-1));
         IERC20(_wantAddress).safeApprove(uniRouterAddress, uint256(-1));

@@ -32,6 +32,7 @@ contract SingleStrategyToken is StrategyToken {
     }
 
     function depositBNB(uint256 _minShares) external payable {
+        require(!depositPaused, "deposit paused");
         require(isWbnb, "not bnb");
         require(msg.value != 0, "deposit must be greater than 0");
         _deposit(msg.value, _minShares);
@@ -39,6 +40,7 @@ contract SingleStrategyToken is StrategyToken {
     }
 
     function deposit(uint256 _amount, uint256 _minShares) override external {
+        require(!depositPaused, "deposit paused");
         require(_amount != 0, "deposit must be greater than 0");
         _deposit(_amount, _minShares);
         IERC20(token).safeTransferFrom(msg.sender, address(this), _amount);
@@ -67,6 +69,7 @@ contract SingleStrategyToken is StrategyToken {
         nonReentrant
         returns (uint256)
     {
+        require(!withdrawPaused, "withdraw paused");
         require(_shares != 0, "shares must be greater than 0");
 
         uint256 ibalance = balanceOf(msg.sender);
@@ -113,11 +116,6 @@ contract SingleStrategyToken is StrategyToken {
     function getPricePerFullShare() override public view returns (uint) {
         uint256 _pool = calcPoolValueInToken();
         return _pool.mul(uint256(10) ** uint256(decimals())).div(totalSupply());
-    }
-
-    function setGovAddress(address _govAddress) override public {
-        require(msg.sender == govAddress, "Not authorized");
-        govAddress = _govAddress;
     }
 
     function sharesToAmount(uint256 _shares) override public view returns (uint256) {

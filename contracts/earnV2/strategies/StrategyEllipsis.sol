@@ -66,9 +66,6 @@ contract StrategyEllipsis is Strategy {
 
         pancakeRouterAddress = _pancakeRouterAddress;
 
-        withdrawFeeNumer = 1;
-        withdrawFeeDenom = 1000;
-
         IERC20(epsAddress).safeApprove(pancakeRouterAddress, uint256(-1));
         IERC20(wantAddress).safeApprove(pancakeRouterAddress, uint256(-1));
         IERC20(busdAddress).safeApprove(ellipsisSwapAddress, uint256(-1));
@@ -134,27 +131,17 @@ contract StrategyEllipsis is Strategy {
     }
 
     function _withdraw(uint256 _wantAmt) internal {        
-        // require(isPoolSafe(), 'pool unsafe');
-        uint256 busdBal = IERC20(busdAddress).balanceOf(ellipsisSwapAddress);
-        uint256 usdcBal = IERC20(usdcAddress).balanceOf(ellipsisSwapAddress);
-        uint256 usdtBal = IERC20(usdtAddress).balanceOf(ellipsisSwapAddress);
-
+        require(isPoolSafe(), 'pool unsafe');
         (uint256 curEps3Bal, )= LpTokenStaker(ellipsisStakeAddress).userInfo(poolId, address(this));
-        uint256 totEps3Bal = IERC20(eps3Address).totalSupply();
         
-        uint256[3] memory withdrawArr;
-        withdrawArr[getTokenIndex(busdAddress)] = busdBal.mul(curEps3Bal).mul(_wantAmt).div(totEps3Bal).div(eps3ToWant());
-        withdrawArr[getTokenIndex(usdcAddress)] = usdcBal.mul(curEps3Bal).mul(_wantAmt).div(totEps3Bal).div(eps3ToWant());
-        withdrawArr[getTokenIndex(usdtAddress)] = usdtBal.mul(curEps3Bal).mul(_wantAmt).div(totEps3Bal).div(eps3ToWant());
-        
-        uint256 eps3Amount = StableSwap(ellipsisSwapAddress).calc_token_amount(withdrawArr, false);
+        uint256 eps3Amount = _wantAmt.mul(curEps3Bal).div(eps3ToWant());
         LpTokenStaker(ellipsisStakeAddress).withdraw(poolId, eps3Amount);
         StableSwap(ellipsisSwapAddress).remove_liquidity_one_coin(
             IERC20(eps3Address).balanceOf(address(this)),
             getTokenIndexInt(wantAddress),
             0
         );
-        // require(isPoolSafe(), 'pool unsafe');
+        require(isPoolSafe(), 'pool unsafe');
     }
 
     function earn() override external whenNotPaused {
@@ -176,8 +163,8 @@ contract StrategyEllipsis is Strategy {
         }
         
         uint256 busdBal = IERC20(busdAddress).balanceOf(address(this));
-        uint256 usdcBal = 0;/*IERC20(usdcAddress).balanceOf(address(this));*/
-        uint256 usdtBal = 0;/*IERC20(usdtAddress).balanceOf(address(this));*/
+        uint256 usdcBal = IERC20(usdcAddress).balanceOf(address(this));
+        uint256 usdtBal = IERC20(usdtAddress).balanceOf(address(this));
         if (busdBal.add(usdcBal).add(usdtBal) != 0) {
             _depositAdditional(
                 busdBal,

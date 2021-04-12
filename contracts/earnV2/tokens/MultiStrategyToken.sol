@@ -20,9 +20,13 @@ contract MultiStrategyToken is StrategyToken {
 
     mapping(address => uint256) public ratios;
 
-    mapping(address => bool) public isActive;
-
-    uint256 public activeCount;
+    mapping (address => bool) public depositActive;
+    
+    mapping (address => bool) public withdrawActive;
+    
+    uint256 public depositActiveCount;
+    
+    uint256 public withdrawActiveCount;
 
     uint256 public ratioTotal;
 
@@ -49,16 +53,20 @@ contract MultiStrategyToken is StrategyToken {
         token = _token;
 
         strategies = _strategies;
+        
         uint256 i;
-        for (i = 0; i < strategies.length; i += 1) {
-            isActive[strategies[i]] = true;
-        }
-        activeCount = strategies.length;
-
         for (i = 0; i < strategies.length; i += 1) {
             ratios[strategies[i]] = 1;
             ratioTotal = ratioTotal.add(ratios[strategies[i]]);
         }
+
+        for (i = 0; i < strategies.length; i += 1) {
+            depositActive[strategies[i]] = true;
+            withdrawActive[strategies[i]] = true;
+        }
+        depositActiveCount = strategies.length;        
+        withdrawActiveCount = strategies.length;
+
 
         entranceFeeNumer = 0;
         entranceFeeDenom = 1;
@@ -75,12 +83,14 @@ contract MultiStrategyToken is StrategyToken {
         override
         external
     {
+        require(!depositPaused, "deposit paused");
         require(_amount != 0, "deposit must be greater than 0");
         IERC20(token).safeTransferFrom(msg.sender, address(this), _amount);
         _deposit(_amount, _minShares);
     }
 
     function depositBNB(uint256 _minShares) external payable {
+        require(!depositPaused, "deposit paused");
         require(isWbnb, "not bnb");
         require(msg.value != 0, "deposit must be greater than 0");
         _wrapBNB(msg.value);
@@ -95,24 +105,11 @@ contract MultiStrategyToken is StrategyToken {
         
         address strategyAddress;
         (strategyAddress,) = findMostInsufficientStrategy();
-        StrategyToken st = StrategyToken(strategyAddress);
-        bool needEntranceFee = (st.totalSupply() != 0 && st.calcPoolValueInToken() != 0);
-        st.deposit(_amount, 0);
+        StrategyToken(strategyAddress).deposit(_amount, 0);
         uint256 sharesToMint = calcPoolValueInToken().sub(_pool);
         if (totalSupply() != 0 && _pool != 0) {
-            if (needEntranceFee) {
-                sharesToMint = sharesToMint.mul(
-                        totalSupply()
-                    )
-                    .mul(
-                        st.entranceFeeDenom().sub(st.entranceFeeNumer())
-                    )
-                    .div(_pool)
-                    .div(st.entranceFeeDenom());
-            } else {
-                sharesToMint = sharesToMint.mul(totalSupply())
-                    .div(_pool);
-            }
+            sharesToMint = sharesToMint.mul(totalSupply())
+                .div(_pool);
         }
         require(sharesToMint >= _minShares, "did not meet minimum shares requested");
         _mint(msg.sender, sharesToMint);    
@@ -141,6 +138,7 @@ contract MultiStrategyToken is StrategyToken {
         nonReentrant
         returns (uint256)
     {
+        require(!withdrawPaused, "withdraw paused");
         require(_shares != 0, "shares must be greater than 0");
 
         uint256 ibalance = balanceOf(msg.sender);
@@ -204,7 +202,7 @@ contract MultiStrategyToken is StrategyToken {
     }
 
     function findMostOverLockedStrategy(uint256 withdrawAmt) public view returns (address, uint256) {
-        address[] memory strats = getAvailableStrategyList();
+        address[] memory strats = getAvailableStrategyList(false);
 
         uint256 totalBalance = calcPoolValueInToken().sub(withdrawAmt);
 
@@ -245,7 +243,7 @@ contract MultiStrategyToken is StrategyToken {
     }
 
     function findMostLockedStrategy() public view returns (address, uint256) {
-        address[] memory strats = getAvailableStrategyList();
+        address[] memory strats = getAvailableStrategyList(false);
 
         uint256 current;
         address lockedMostAddr = strats[0];
@@ -264,7 +262,7 @@ contract MultiStrategyToken is StrategyToken {
     }
 
     function findMostInsufficientStrategy() public view returns (address, uint256) {
-        address[] memory strats = getAvailableStrategyList();
+        address[] memory strats = getAvailableStrategyList(true);
 
         uint256 totalBalance = calcPoolValueInToken();
 
@@ -337,17 +335,26 @@ contract MultiStrategyToken is StrategyToken {
         return sum;
     }
 
-    function getAvailableStrategyList() internal view returns (address[] memory) {
-        require(activeCount != 0, "none of the strategies are active");
-        address[] memory addrArr = new address[](activeCount);
+    function getAvailableStrategyList(bool isDeposit) internal view returns (address[] memory) {
+        uint256 activeCnt = isDeposit ? depositActiveCount : withdrawActiveCount;
+        require(activeCnt != 0, "none of the strategies are active");
+        address[] memory addrArr = new address[](activeCnt);
         uint256 i = 0;
         uint256 cnt = 0;
         for (; i < strategies.length; i += 1) {
-            if (isActive[strategies[i]]) {
-                addrArr[cnt] = strategies[i];
-                cnt += 1;
+            if (isDeposit) {
+                if (depositActive[strategies[i]]) {
+                    addrArr[cnt] = strategies[i];
+                    cnt += 1;
+                }
+            } else {
+                if (withdrawActive[strategies[i]]) {
+                    addrArr[cnt] = strategies[i];
+                    cnt += 1;
+                }
             }
         }
+
         return addrArr;
     }
 
@@ -394,29 +401,30 @@ contract MultiStrategyToken is StrategyToken {
         return shares;
     }
 
-    function setGovAddress(address _govAddress) override public {
-        require(msg.sender == govAddress, "Not authorized");
-        govAddress = _govAddress;
-    }
 
     function setEntranceFee(uint256 _entranceFeeNumer, uint256 _entranceFeeDenom) override external {
         revert("no entrance Fee for  ");
     }
     
+    function setStrategyActive(uint256 index, bool isDeposit, bool b) public {
+        require(msg.sender == govAddress, "Not authorized");
+        mapping(address => bool) storage isActive = isDeposit ? depositActive : withdrawActive;
+        require(index < strategies.length, "invalid index");
+        require(isActive[strategies[index]] != b, b ? "already active" : "already inactive");
+        if (isDeposit) {
+            depositActiveCount = b ? depositActiveCount.add(1) : depositActiveCount.sub(1);
+        } else {
+            withdrawActiveCount = b ? withdrawActiveCount.add(1) : withdrawActiveCount.sub(1);
+        }
+        isActive[strategies[index]] = b;
+    }
+
     function setRebalanceThreshold(uint256 _rebalanceThresholdNumer, uint256 _rebalanceThresholdDenom) external {
         require(msg.sender == govAddress, "Not authorized");
         require(_rebalanceThresholdDenom != 0, "denominator should not be 0");
         require(_rebalanceThresholdDenom >= _rebalanceThresholdNumer, "denominator should be greater than or equal to the numerator");
         rebalanceThresholdNumer = _rebalanceThresholdNumer;
         rebalanceThresholdDenom = _rebalanceThresholdDenom;
-    }
-
-    function setStrategyActive(uint256 index, bool b) public {
-        require(msg.sender == govAddress);
-        require(index < strategies.length, "invalid index");
-        require(isActive[strategies[index]] != b, b ? "already active" : "already inactive");
-        activeCount = b ? activeCount.add(1) : activeCount.sub(1);
-        isActive[strategies[index]] = b;
     }
 
     function strategyCount() public view returns (uint256) {

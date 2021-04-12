@@ -65,7 +65,7 @@ def transferFrom(_from : address, _to : address, _value : uint256) -> bool:
 
 @public
 def approve(_spender : address, _value : uint256) -> bool:
-    assert _value == 0 or self.allowances[msg.sender][_spender] == 0
+    #assert _value == 0 or self.allowances[msg.sender][_spender] == 0
     self.allowances[msg.sender][_spender] = _value
     log.Approval(msg.sender, _spender, _value)
     return True
