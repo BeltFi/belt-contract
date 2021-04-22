@@ -10,8 +10,8 @@ contract bERC20:
     def symbol() -> string[32]: constant
     def decimals() -> uint256: constant
     def balanceOf(arg0: address) -> uint256: constant
-    def deposit(depositAmount: uint256): modifying
-    def withdraw(withdrawTokens: uint256): modifying
+    def deposit(depositAmount: uint256, minShare: uint256): modifying
+    def withdraw(withdrawTokens: uint256, minShare: uint256): modifying
     def getPricePerFullShare() -> uint256: constant
 
 contract BeltLP:
@@ -24,12 +24,12 @@ contract BeltLP:
     def owner() -> address: constant
 
 
-N_COINS: constant(int128) = 3
+N_COINS: constant(int128) = 4
 ZERO256: constant(uint256) = 0 
-ZEROS: constant(uint256[N_COINS]) = [ZERO256, ZERO256, ZERO256]
+ZEROS: constant(uint256[N_COINS]) = [ZERO256, ZERO256, ZERO256, ZERO256]
 LENDING_PRECISION: constant(uint256) = 10 ** 18
 PRECISION: constant(uint256) = 10 ** 18
-PRECISION_MUL: constant(uint256[N_COINS]) = [convert(1, uint256), convert(1, uint256), convert(1, uint256)]
+PRECISION_MUL: constant(uint256[N_COINS]) = [convert(1, uint256), convert(1, uint256), convert(1, uint256), convert(1, uint256)]
 FEE_DENOMINATOR: constant(uint256) = 10 ** 10
 FEE_IMPRECISION: constant(uint256) = 25 * 10 ** 8 
 
@@ -61,7 +61,7 @@ def add_liquidity(uamounts: uint256[N_COINS], min_mint_amount: uint256):
                 .transferFrom(msg.sender, self, uamount))
 
             ERC20(self.underlying_coins[i]).approve(self.coins[i], uamount)
-            bERC20(self.coins[i]).deposit(uamount)
+            bERC20(self.coins[i]).deposit(uamount, 0)
             amounts[i] = bERC20(self.coins[i]).balanceOf(self)
             ERC20(self.coins[i]).approve(self.beltLP, amounts[i])
 
@@ -80,7 +80,7 @@ def _send_all(_addr: address, min_uamounts: uint256[N_COINS], one: int128):
             _balance: uint256 = bERC20(_coin).balanceOf(self)
             if _balance == 0:
                 continue
-            bERC20(_coin).withdraw(_balance)
+            bERC20(_coin).withdraw(_balance, 0)
 
             _ucoin: address = self.underlying_coins[i]
             _uamount: uint256 = ERC20(_ucoin).balanceOf(self)

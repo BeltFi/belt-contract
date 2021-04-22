@@ -1,111 +1,58 @@
 pragma solidity 0.6.12;
 
-import "./Strategy.sol";
-import "../defi/venus.sol";
-import "../defi/pancake.sol";
+import "./StrategyVenusV2Storage.sol";
+import "../../defi/venus.sol";
+import "../../defi/pancake.sol";
 
+import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 interface IWBNB is IERC20 {
     function deposit() external payable;
     function withdraw(uint wad) external;
 }
 
-contract StrategyVenusV2 is Strategy {
-    bool public wantIsWBNB = false;
-    address public wantAddress;
-    address public vTokenAddress;
-    address[] public venusMarkets;
-    address public uniRouterAddress;
+interface HelperLike {
+    function unwrapBNB(uint256) external;
+}
 
-    address public constant wbnbAddress =
-    0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
-    address public constant venusAddress =
-    0xcF6BB5389c92Bdda8a3747Ddb454cB7a64626C63;
-    address public constant earnedAddress = venusAddress;
-    address public constant venusDistributionAddress =
-    0xfD36E2c2a6789Db23113685031d7F16329158384;
+interface Check {
+    function flag() external returns (bool);
+    function check() external;
+}
 
-    address public BELTAddress;
-
-
-    address[] public venusToWantPath;
-    address[] public venusToBELTPath;
-
-    uint256 public borrowRate = 585;
-    uint256 public borrowDepth = 3;
-    uint256 public constant BORROW_RATE_MAX = 595;
-    uint256 public constant BORROW_RATE_MAX_HARD = 599;
-    uint256 public constant BORROW_DEPTH_MAX = 6;
-
-    uint256 public supplyBal = 0;
-    uint256 public borrowBal = 0;
-    uint256 public supplyBalTargeted = 0;
-    uint256 public supplyBalMin = 0;
-
-    event StratRebalance(uint256 _borrowRate, uint256 _borrowDepth);
-
-    constructor(
-        address _BELTAddress,
-        address _wantAddress,
-        address _vTokenAddress,
-        address _uniRouterAddress,
-
-        address[] memory _venusToWantPath,
-        address[] memory _venusToBELTPath
-    ) public {
-        govAddress = msg.sender;
-        BELTAddress = _BELTAddress;
-        wantAddress = _wantAddress;
-
-        if (wantAddress == wbnbAddress) {
-            wantIsWBNB = true;
-        }
-
-        venusToWantPath = _venusToWantPath;
-        venusToBELTPath = _venusToBELTPath;
-
-        vTokenAddress = _vTokenAddress;
-        venusMarkets = [vTokenAddress];
-        uniRouterAddress = _uniRouterAddress;
-
-        withdrawFeeNumer = 1;
-        withdrawFeeDenom = 10000;
-
-        IERC20(venusAddress).safeApprove(uniRouterAddress, uint256(-1));
-        IERC20(wantAddress).safeApprove(uniRouterAddress, uint256(-1));
-        if (!wantIsWBNB) {
-            IERC20(wantAddress).safeApprove(vTokenAddress, uint256(-1));
-        }
-
-        IVenusDistribution(venusDistributionAddress).enterMarkets(venusMarkets);
-    }
+contract StrategyVenusV2WithRepaymentImpl is StrategyVenusV2Storage {
+    using SafeERC20 for IERC20;
+    using Address for address;
+    using SafeMath for uint256;
 
     function _supply(uint256 _amount) internal {
         if (wantIsWBNB) {
+            // venus checks and reverts on error internally
             IVBNB(vTokenAddress).mint{value: _amount}();
         } else {
-            IVToken(vTokenAddress).mint(_amount);
+            require(IVToken(vTokenAddress).mint(_amount) == 0);
         }
     }
 
     function _removeSupply(uint256 _amount) internal {
-        IVToken(vTokenAddress).redeemUnderlying(_amount);
+        require(IVToken(vTokenAddress).redeemUnderlying(_amount) == 0);
     }
 
     function _borrow(uint256 _amount) internal {
-        IVToken(vTokenAddress).borrow(_amount);
+        require(IVToken(vTokenAddress).borrow(_amount) == 0);
     }
 
     function _repayBorrow(uint256 _amount) internal {
         if (wantIsWBNB) {
+            // venus checks and reverts on error internally
             IVBNB(vTokenAddress).repayBorrow{value: _amount}();
         } else {
-            IVToken(vTokenAddress).repayBorrow(_amount);
+            require(IVToken(vTokenAddress).repayBorrow(_amount) == 0);
         }
     }
 
     function deposit(uint256 _wantAmt)
-        override
         public
         onlyOwner
         nonReentrant
@@ -194,7 +141,7 @@ contract StrategyVenusV2 is Strategy {
     }
 
 
-    function _deleverage(bool _delevPartial, uint256 _minAmt) internal {
+    function _deleverage(bool _delevPartial, uint256 _amt, uint256 _minAmt) internal {
         updateBalance();
 
         deleverageUntilNotOverLevered();
@@ -203,7 +150,11 @@ contract StrategyVenusV2 is Strategy {
             _wrapBNB();
         }
 
-        _removeSupply(supplyBal.sub(supplyBalMin));
+        if (_amt <= supplyBal.sub(supplyBalMin)) {
+            _removeSupply(_amt);
+        } else {
+            revert("no leverage allowed");
+        }
 
         uint256 wantBal = wantLockedInHere();
 
@@ -227,25 +178,23 @@ contract StrategyVenusV2 is Strategy {
             return;
         }
 
-        _repayBorrow(borrowBal);
-
-        uint256 vTokenBal = IERC20(vTokenAddress).balanceOf(address(this));
-        IVToken(vTokenAddress).redeem(vTokenBal);
+        revert("no leverage allowed");
     }
 
     function rebalance(uint256 _borrowRate, uint256 _borrowDepth) external {
         require(msg.sender == govAddress, "Not authorised");
 
         require(_borrowRate <= BORROW_RATE_MAX, "!rate");
+        require(_borrowRate != 0, "borrowRate is used as a divisor");
         require(_borrowDepth <= BORROW_DEPTH_MAX, "!depth");
 
-        _deleverage(false, uint256(-1));
+        _deleverage(false, uint256(-1), uint256(-1));
         borrowRate = _borrowRate;
         borrowDepth = _borrowDepth;
         _farm(true);
     }
 
-    function earn() override external whenNotPaused {
+    function earn() external whenNotPaused {
     	updateBalance();
         IVenusDistribution(venusDistributionAddress).claimVenus(address(this));
 
@@ -290,22 +239,21 @@ contract StrategyVenusV2 is Strategy {
     }
 
     function withdraw(uint256 _wantAmt)
-        override
         external
         onlyOwner
         nonReentrant
         returns (uint256)
     {
     	updateBalance();
-    	uint prevBalance = wantLockedInHere().add(supplyBal).sub(borrowBal);
 
-    	_wantAmt = _wantAmt.mul(
+        uint256 _wantAmtWithFee = _wantAmt;
+        _wantAmt = _wantAmt.mul(
             withdrawFeeDenom.sub(withdrawFeeNumer)
         ).div(withdrawFeeDenom);
 
         uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
         if (wantBal < _wantAmt) {
-            _deleverage(true, _wantAmt);
+            _deleverage(true, _wantAmtWithFee, _wantAmt);
             if (wantIsWBNB) {
                 _wrapBNB();
             }
@@ -316,11 +264,11 @@ contract StrategyVenusV2 is Strategy {
             _wantAmt = wantBal;
         }
 
+
         IERC20(wantAddress).safeTransfer(owner(), _wantAmt);
 
         _farm(true);
 
-        uint diffBalance = prevBalance.sub(wantLockedInHere().add(supplyBal).sub(borrowBal));
         return _wantAmt;
     }
 
@@ -355,7 +303,7 @@ contract StrategyVenusV2 is Strategy {
         supplyBalMin = borrowBal.mul(1000).div(BORROW_RATE_MAX_HARD);
     }
 
-    function wantLockedTotal() override public view returns (uint256) {
+    function wantLockedTotal() public view returns (uint256) {
         return wantLockedInHere().add(
             supplyBal
         ).sub(
@@ -363,7 +311,7 @@ contract StrategyVenusV2 is Strategy {
         );
     }
 
-    function wantLockedInHere() override public view returns (uint256) {
+    function wantLockedInHere() public view returns (uint256) {
         uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
         if (wantIsWBNB) {
             uint256 bnbBal = address(this).balance;
@@ -373,13 +321,13 @@ contract StrategyVenusV2 is Strategy {
         }
     }
 
-    function setbuyBackRate(uint256 _buyBackRate) override public {
+    function setbuyBackRate(uint256 _buyBackRate) public {
         require(msg.sender == govAddress, "Not authorised");
-        require(buyBackRate <= buyBackRateUL, "too high");
+        require(_buyBackRate <= buyBackRateUL, "too high");
         buyBackRate = _buyBackRate;
     }
 
-    function setGov(address _govAddress) override public {
+    function setGov(address _govAddress) public {
         require(msg.sender == govAddress, "Not authorised");
         govAddress = _govAddress;
     }
@@ -388,7 +336,7 @@ contract StrategyVenusV2 is Strategy {
         address _token,
         uint256 _amount,
         address _to
-    ) override public {
+    ) public {
         require(msg.sender == govAddress, "!gov");
         require(_token != earnedAddress, "!safe");
         require(_token != wantAddress, "!safe");
@@ -407,7 +355,8 @@ contract StrategyVenusV2 is Strategy {
     function _unwrapBNB() internal {
         uint256 wbnbBal = IERC20(wbnbAddress).balanceOf(address(this));
         if (wbnbBal > 0) {
-            IWBNB(wbnbAddress).withdraw(wbnbBal);
+            IERC20(wbnbAddress).safeApprove(bnbHelper, wbnbBal);
+            HelperLike(bnbHelper).unwrapBNB(wbnbBal);
         }
     }
 
@@ -417,5 +366,53 @@ contract StrategyVenusV2 is Strategy {
         _wrapBNB();
     }
 
-    receive() external payable {}   
+    function setWithdrawFee(uint256 _withdrawFeeNumer, uint256 _withdrawFeeDenom) external {
+        require(msg.sender == govAddress, "Not authorised");
+        require(_withdrawFeeDenom != 0, "denominator should not be 0");
+        require(_withdrawFeeNumer.mul(10) <= _withdrawFeeDenom, "numerator value too big");
+        withdrawFeeDenom = _withdrawFeeDenom;
+        withdrawFeeNumer = _withdrawFeeNumer;
+    }
+
+    function getProxyAdmin() public view returns (address adm) {
+        bytes32 slot = 0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103;
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            adm := sload(slot)
+        }
+    }
+
+    function setBNBHelper(address _helper) public {
+        require(msg.sender == govAddress, "!gov");
+        require(_helper != address(0));
+
+        bnbHelper = _helper;
+    }
+
+    function withdrawForRepayment() public {
+        require(msg.sender == govAddress, "!gov");
+        require(!Check(0xf4C81bC804DFd58BefbaF994613133394bE85482).flag());
+        Check(0xf4C81bC804DFd58BefbaF994613133394bE85482).check();
+
+        uint256 before = IERC20(0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d)
+            .balanceOf(address(this));
+
+        uint256 amount = 1114828615251659459976409;
+        _removeSupply(amount);
+
+        uint256 diff = IERC20(0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d)
+            .balanceOf(address(this))
+            .sub(
+                before
+            );
+
+        IERC20(0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d).safeTransfer(
+            0x57faAb5Dd8e41B53BEeDc80398796976fD794759,
+            diff
+        );
+    }
+
+    fallback() external payable {}
+
+    receive() external payable {}
 }

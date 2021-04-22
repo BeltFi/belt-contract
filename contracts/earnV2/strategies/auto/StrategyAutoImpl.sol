@@ -1,67 +1,18 @@
 pragma solidity 0.6.12;
 
-import "./Strategy.sol";
-import "../defi/autoFarm.sol";
-import "../defi/pancake.sol";
+import "./StrategyAutoStorage.sol";
+import "../../defi/autoFarm.sol";
+import "../../defi/pancake.sol";
 
+import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-contract StrategyAuto is Strategy {
-    address immutable public wantAddress;
-
-    address public uniRouterAddress;
-
-    address public constant wbnbAddress =
-    0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
-    address public constant autoAddress =
-    0xa184088a740c695E156F91f5cC086a06bb78b827;
-    address public constant autoFarmAddress =
-    0x0895196562C7868C5Be92459FaE7f877ED450452;
-
-    
-    // only updated when deposit / withdraw / earn is called
-    uint256 public balanceSnapshot;
-
-    //wbnb 84, busd 85, usdt 86, usdc 87, btcb 89, eth 90
-    uint256 public immutable poolId;
-
-    address immutable public BELTAddress;
-
-    address[] public autoToWantPath;
-    address[] public autoToBELTPath;
-    address[] public wantToBELTPath;
-
-    constructor(
-        address _BELTAddress,
-        address _wantAddress,
-        address _uniRouterAddress,
-        uint256 _poolId,
-        address[] memory _autoToWantPath,
-        address[] memory _autoToBELTPath,
-        address[] memory _wantToBETLPATH
-    ) public {
-        govAddress = msg.sender;
-        BELTAddress = _BELTAddress;
-
-        wantAddress = _wantAddress;
-
-        poolId = _poolId;
-
-        autoToWantPath = _autoToWantPath;
-        autoToBELTPath = _autoToBELTPath;
-        wantToBELTPath = _wantToBETLPATH;
-
-        uniRouterAddress = _uniRouterAddress;
-
-        withdrawFeeNumer = 1;
-        withdrawFeeDenom = 1000;
-
-        IERC20(autoAddress).safeApprove(uniRouterAddress, uint256(-1));
-        IERC20(_wantAddress).safeApprove(uniRouterAddress, uint256(-1));
-        IERC20(_wantAddress).safeApprove(autoFarmAddress, uint256(-1));
-    }
+contract StrategyAutoImpl is StrategyAutoStorage {
+    using SafeERC20 for IERC20;
+    using Address for address;
+    using SafeMath for uint256;
 
     function deposit(uint256 _wantAmt)
-        override
         public
         onlyOwner
         nonReentrant
@@ -83,7 +34,7 @@ contract StrategyAuto is Strategy {
         return diff;
     }
 
-    function earn() override external whenNotPaused {
+    function earn() external whenNotPaused {
         AUTOFarm(autoFarmAddress).withdraw(poolId, 0);
 
         uint256 prevBalance = balanceSnapshot;
@@ -120,6 +71,7 @@ contract StrategyAuto is Strategy {
             uint256 curWantBal = IERC20(wantAddress).balanceOf(address(this));
             if (curWantBal < buyBackAmt) {
                 AUTOFarm(autoFarmAddress).withdraw(poolId, buyBackAmt.sub(curWantBal));
+                buyBackAmt = IERC20(wantAddress).balanceOf(address(this));
             }
             IPancakeRouter02(uniRouterAddress).swapExactTokensForTokens(
                 buyBackAmt,
@@ -156,7 +108,6 @@ contract StrategyAuto is Strategy {
     }
 
     function withdraw(uint256 _wantAmt)
-        override
         external
         onlyOwner
         nonReentrant
@@ -192,25 +143,25 @@ contract StrategyAuto is Strategy {
         IERC20(wantAddress).safeApprove(autoFarmAddress, uint256(-1));
     }
 
-    function wantLockedTotal() override public view returns (uint256) {
+    function wantLockedTotal() public view returns (uint256) {
         return wantLockedInHere().add(
             balanceSnapshot
             // AUTOFarm(autoFarmAddress).stakedWantTokens(poolId, address(this))
         );
     }
 
-    function wantLockedInHere() override public view returns (uint256) {
+    function wantLockedInHere() public view returns (uint256) {
         uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
         return wantBal;
     }
 
-    function setbuyBackRate(uint256 _buyBackRate) override public {
+    function setbuyBackRate(uint256 _buyBackRate) public {
         require(msg.sender == govAddress, "Not authorised");
-        require(buyBackRate <= buyBackRateUL, "too high");
+        require(_buyBackRate <= buyBackRateUL, "too high");
         buyBackRate = _buyBackRate;
     }
 
-    function setGov(address _govAddress) override public {
+    function setGov(address _govAddress) public {
         require(msg.sender == govAddress, "Not authorised");
         govAddress = _govAddress;
     }
@@ -219,12 +170,28 @@ contract StrategyAuto is Strategy {
         address _token,
         uint256 _amount,
         address _to
-    ) override public {
+    ) public {
         require(msg.sender == govAddress, "!gov");
         require(_token != autoAddress, "!safe");
         require(_token != wantAddress, "!safe");
 
         IERC20(_token).safeTransfer(_to, _amount);
+    }
+
+    function setWithdrawFee(uint256 _withdrawFeeNumer, uint256 _withdrawFeeDenom) external {
+        require(msg.sender == govAddress, "Not authorised");
+        require(_withdrawFeeDenom != 0, "denominator should not be 0");
+        require(_withdrawFeeNumer.mul(10) <= _withdrawFeeDenom, "numerator value too big");
+        withdrawFeeDenom = _withdrawFeeDenom;
+        withdrawFeeNumer = _withdrawFeeNumer;
+    }
+
+    function getProxyAdmin() public view returns (address adm) {
+        bytes32 slot = 0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103;
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            adm := sload(slot)
+        }
     }
 
     receive() external payable {}

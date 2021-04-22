@@ -1,74 +1,27 @@
 pragma solidity 0.6.12;
 
-import "./Strategy.sol";
-import "../defi/alpaca.sol";
-import "../defi/pancake.sol";
+import "./StrategyAlpacaStorage.sol";
+import "../../defi/alpaca.sol";
+import "../../defi/pancake.sol";
+
+import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 interface IWBNB is IERC20 {
     function deposit() external payable;
     function withdraw(uint256 wad) external;
 }
 
-contract StrategyAlpaca is Strategy {
+interface HelperLike {
+    function unwrapBNB(uint256) external;
+}
 
-    address public uniRouterAddress;
-
-    address public constant wbnbAddress =
-    0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
-    address public constant alpacaAddress =
-    0x8F0528cE5eF7B51152A59745bEfDD91D97091d2F;
-    address public constant fairLaunchAddress =
-    0xA625AB01B08ce023B2a342Dbb12a16f2C8489A8F;
-
-    bool public immutable isWbnb;
-
-    address public vaultAddress;
-    address public wantAddress;
-    address immutable public BELTAddress;
-
-    // only updated when deposit / withdraw / earn is called
-    uint256 public balanceSnapshot;
-
-    // 1 = WBNB, 3 = BUSD
-    uint256 public immutable poolId;
-
-    address[] public alpacaToWantPath;
-    address[] public alpacaToBELTPath;
-    address[] public wantToBELTPath;
-
-    constructor(
-        address _vaultAddress,
-        address _BELTAddress,
-        address _wantAddress,
-        address _uniRouterAddress,
-        uint256 _poolId,
-        address[] memory _alpacaToWantPath,
-        address[] memory _alpacaToBELTPath,
-        address[] memory _wantToBETLPATH
-    ) public {
-        govAddress = msg.sender;
-
-        vaultAddress = _vaultAddress;
-        wantAddress = _wantAddress;
-        BELTAddress = _BELTAddress;
-
-        poolId = _poolId;
-        isWbnb = _wantAddress == wbnbAddress;
-
-        alpacaToWantPath = _alpacaToWantPath;
-        alpacaToBELTPath = _alpacaToBELTPath;
-        wantToBELTPath = _wantToBETLPATH;
-
-        uniRouterAddress = _uniRouterAddress;
-
-        IERC20(alpacaAddress).safeApprove(uniRouterAddress, uint256(-1));
-        IERC20(_wantAddress).safeApprove(uniRouterAddress, uint256(-1));
-        IERC20(_wantAddress).safeApprove(vaultAddress, uint256(-1));
-        IERC20(vaultAddress).safeApprove(fairLaunchAddress, uint256(-1));
-    }
+contract StrategyAlpacaImpl is StrategyAlpacaStorage {
+    using SafeERC20 for IERC20;
+    using Address for address;
+    using SafeMath for uint256;
 
     function deposit(uint256 _wantAmt)
-        override
         public
         onlyOwner
         nonReentrant
@@ -100,7 +53,7 @@ contract StrategyAlpaca is Strategy {
         FairLaunch(fairLaunchAddress).deposit(address(this), poolId, Vault(vaultAddress).balanceOf(address(this)));
     }
 
-    function earn() override external whenNotPaused {
+    function earn() external whenNotPaused {
         FairLaunch(fairLaunchAddress).harvest(poolId);
 
         uint256 earnedAmt = AlpacaToken(alpacaAddress).balanceOf(address(this));
@@ -186,16 +139,16 @@ contract StrategyAlpaca is Strategy {
     }
 
     function withdraw(uint256 _wantAmt)
-        override
         external
         onlyOwner
         nonReentrant
         returns (uint256)
     {
-        _wantAmt = _wantAmt.mul(withdrawFeeDenom.sub(withdrawFeeNumer)).div(withdrawFeeDenom);
+        _wantAmt = _wantAmt.mul(
+            withdrawFeeDenom.sub(withdrawFeeNumer)
+        ).div(withdrawFeeDenom);
         
         uint wantBal;
-        uint256 lockedAmt = wantLockedInHere();
         uint256 diff = _stakedWantTokens();
 
         if(_wantAmt > wantLockedInHere()) {
@@ -205,13 +158,18 @@ contract StrategyAlpaca is Strategy {
             diff = diff.sub(
                 _stakedWantTokens()
             );
-            wantBal = lockedAmt.add(diff);
+            wantBal = IERC20(wantAddress).balanceOf(address(this));
         } else {
             wantBal = _wantAmt;
+            diff = wantBal;
         }
 
         if(isWbnb) {
             _wrapBNB();
+        }
+        
+        if (wantBal > _wantAmt) {
+            wantBal = _wantAmt;
         }
 
         IERC20(wantAddress).safeTransfer(owner(), wantBal);
@@ -251,24 +209,24 @@ contract StrategyAlpaca is Strategy {
         IERC20(wantAddress).safeApprove(vaultAddress, uint256(-1));
     }
 
-    function wantLockedTotal() override public view returns (uint256) {
+    function wantLockedTotal() public view returns (uint256) {
         return wantLockedInHere().add(
             balanceSnapshot
         );
     }
 
-    function wantLockedInHere() override public view returns (uint256) {
+    function wantLockedInHere() public view returns (uint256) {
         uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
         return wantBal;
     }
 
-    function setbuyBackRate(uint256 _buyBackRate) override public {
+    function setbuyBackRate(uint256 _buyBackRate) public {
         require(msg.sender == govAddress, "Not authorised");
-        require(buyBackRate <= buyBackRateUL, "too high");
+        require(_buyBackRate <= buyBackRateUL, "too high");
         buyBackRate = _buyBackRate;
     }
 
-    function setGov(address _govAddress) override public {
+    function setGov(address _govAddress) public {
         require(msg.sender == govAddress, "Not authorised");
         govAddress = _govAddress;
     }
@@ -277,7 +235,7 @@ contract StrategyAlpaca is Strategy {
         address _token,
         uint256 _amount,
         address _to
-    ) override public {
+    ) public {
         require(msg.sender == govAddress, "!gov");
         require(_token != alpacaAddress, "!safe");
         require(_token != wantAddress, "!safe");
@@ -296,9 +254,34 @@ contract StrategyAlpaca is Strategy {
     function _unwrapBNB() internal {
         uint256 wbnbBal = IERC20(wbnbAddress).balanceOf(address(this));
         if (wbnbBal > 0) {
-            IWBNB(wbnbAddress).withdraw(wbnbBal);
+            IERC20(wbnbAddress).safeApprove(bnbHelper, wbnbBal);
+            HelperLike(bnbHelper).unwrapBNB(wbnbBal);
         }
     }
 
+    function setWithdrawFee(uint256 _withdrawFeeNumer, uint256 _withdrawFeeDenom) external {
+        require(msg.sender == govAddress, "Not authorised");
+        require(_withdrawFeeDenom != 0, "denominator should not be 0");
+        require(_withdrawFeeNumer.mul(10) <= _withdrawFeeDenom, "numerator value too big");
+        withdrawFeeDenom = _withdrawFeeDenom;
+        withdrawFeeNumer = _withdrawFeeNumer;
+    }
+
+    function getProxyAdmin() public view returns (address adm) {
+        bytes32 slot = 0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103;
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            adm := sload(slot)
+        }
+    }
+
+    function setBNBHelper(address _helper) public {
+        require(msg.sender == govAddress, "!gov");
+        require(_helper != address(0));
+
+        bnbHelper = _helper;
+    }
+
+    fallback() external payable {}
     receive() external payable {}
 }

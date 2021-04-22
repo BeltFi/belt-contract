@@ -23,23 +23,23 @@ contract bERC20:
     def symbol() -> string[32]: constant
     def decimals() -> uint256: constant
     def balanceOf(arg0: address) -> uint256: constant
-    def deposit(depositAmount: uint256): modifying
-    def withdraw(withdrawTokens: uint256): modifying
+    def deposit(depositAmount: uint256, minShare: uint256): modifying
+    def withdraw(withdrawTokens: uint256, minShare: uint256): modifying
     def getPricePerFullShare() -> uint256: constant
 
 
 from vyper.interfaces import ERC20
 
-N_COINS: constant(int128) = 3  # <- change
+N_COINS: constant(int128) = 4  # <- change
 
 ZERO256: constant(uint256) = 0  # This hack is really bad XXX
-ZEROS: constant(uint256[N_COINS]) = [ZERO256, ZERO256, ZERO256]  # <- change
+ZEROS: constant(uint256[N_COINS]) = [ZERO256, ZERO256, ZERO256, ZERO256]  # <- change
 
-TETHERED: constant(bool[N_COINS]) = [False, False, False]
+TETHERED: constant(bool[N_COINS]) = [False, False, False, False]
 
 FEE_DENOMINATOR: constant(uint256) = 10 ** 10
 PRECISION: constant(uint256) = 10 ** 18  # The precision to convert to
-PRECISION_MUL: constant(uint256[N_COINS]) = [convert(1, uint256), convert(1, uint256), convert(1, uint256)]
+PRECISION_MUL: constant(uint256[N_COINS]) = [convert(1, uint256), convert(1, uint256), convert(1, uint256), convert(1, uint256)]
 
 admin_actions_delay: constant(uint256) = 3 * 86400
 
@@ -395,7 +395,7 @@ def exchange_underlying(i: int128, j: int128, dx: uint256, min_dy: uint256):
     ERC20(self.underlying_coins[i]).approve(self.coins[i], dx)
     
     dx_: uint256 = ERC20(self.coins[i]).balanceOf(self)
-    bERC20(self.coins[i]).deposit(dx)
+    bERC20(self.coins[i]).deposit(dx, 0)
     dx_ = ERC20(self.coins[i]).balanceOf(self) - dx_
     
     dy_: uint256 = self._exchange(i, j, dx_, rates)
@@ -404,7 +404,7 @@ def exchange_underlying(i: int128, j: int128, dx: uint256, min_dy: uint256):
     tethered: bool[N_COINS] = TETHERED
 
     ok: uint256 = 0
-    bERC20(self.coins[j]).withdraw(dy_)
+    bERC20(self.coins[j]).withdraw(dy_, 0)
     dy = ERC20(self.underlying_coins[j]).balanceOf(self)
     assert dy >= min_dy, "Exchange resulted in fewer coins than expected"
 

@@ -1,66 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.6.12;
 
-import "./Strategy.sol";
-import "../defi/acryptos.sol";
-import "../defi/pancake.sol";
+import "./StrategyACryptoStorage.sol";
+import "../../defi/acryptos.sol";
+import "../../defi/pancake.sol";
 
+import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-contract StrategyACrypto is Strategy {
-
-    uint256 public harvestFee;
-
-    address public pancakeRouterAddress;
-
-    address public constant wbnbAddress =
-    0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
-    address public constant acsAddress =
-    0x4197C6EF3879a08cD51e5560da5064B773aa1d29;
-    address public constant acsFarmAddress =
-    0xb1fa5d3c0111d8E9ac43A19ef17b281D5D4b474E;
-
-    address public vaultAddress;
-    address public wantAddress;
-    address immutable public BELTAddress;
-
-    // only updated when deposit / withdraw / earn is called
-    uint256 public balanceSnapshot;
-
-    address[] public ACSToWantPath;
-    address[] public ACSToBELTPath;
-    address[] public wantToBELTPath;
-
-    constructor(
-        address _vaultAddress,
-        address _BELTAddress,
-        address _wantAddress,
-        address _pancakeRouterAddress,
-        address[] memory _ACSToWantPath,
-        address[] memory _ACSToBELTPath,
-        address[] memory _wantToBETLPATH
-    ) public {
-        harvestFee = 10 * 10 ** 18;
-
-        govAddress = msg.sender;
-        vaultAddress = _vaultAddress;
-        BELTAddress = _BELTAddress;
-
-        wantAddress = _wantAddress;
-
-        ACSToWantPath = _ACSToWantPath;
-        ACSToBELTPath = _ACSToBELTPath;
-        wantToBELTPath = _wantToBETLPATH;
-
-        pancakeRouterAddress = _pancakeRouterAddress;
-
-        IERC20(acsAddress).safeApprove(pancakeRouterAddress, uint256(-1));
-        IERC20(wantAddress).safeApprove(pancakeRouterAddress, uint256(-1));
-        IERC20(wantAddress).safeApprove(vaultAddress, uint256(-1));
-        IERC20(vaultAddress).safeApprove(acsFarmAddress, uint256(-1));
-    }
+contract StrategyACryptoImpl is StrategyACryptoStorage {
+    using SafeERC20 for IERC20;
+    using Address for address;
+    using SafeMath for uint256;
     
     function deposit(uint256 _wantAmt)
-        override
         public
         onlyOwner
         nonReentrant
@@ -88,7 +41,6 @@ contract StrategyACrypto is Strategy {
     }
     
     function withdraw(uint256 _wantAmt)
-        override
         public
         onlyOwner
         nonReentrant
@@ -119,7 +71,7 @@ contract StrategyACrypto is Strategy {
         return _amount.mul(ACryptoSVault(vaultAddress).getPricePerFullShare()).div(1e18);
     }
 
-    function earn() override external whenNotPaused {
+    function earn() external whenNotPaused {
         uint256 pending = ACryptoSFarm(acsFarmAddress).pendingSushi(vaultAddress, address(this));
         if(pending > harvestFee) {
             ACryptoSFarm(acsFarmAddress).harvest(vaultAddress);
@@ -218,22 +170,22 @@ contract StrategyACrypto is Strategy {
         IERC20(wantAddress).safeApprove(vaultAddress, uint256(-1));
     }
 
-    function wantLockedTotal() override public view returns (uint256) {
+    function wantLockedTotal() public view returns (uint256) {
         return wantLockedInHere().add(balanceSnapshot);
     }
 
-    function wantLockedInHere() override public view returns (uint256) {
+    function wantLockedInHere() public view returns (uint256) {
         uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
         return wantBal;
     }
 
-    function setbuyBackRate(uint256 _buyBackRate) override public {
+    function setbuyBackRate(uint256 _buyBackRate) public {
         require(msg.sender == govAddress, "Not authorised");
-        require(buyBackRate <= buyBackRateUL, "too high");
+        require(_buyBackRate <= buyBackRateUL, "too high");
         buyBackRate = _buyBackRate;
     }
 
-    function setGov(address _govAddress) override public {
+    function setGov(address _govAddress) public {
         require(msg.sender == govAddress, "Not authorised");
         govAddress = _govAddress;
     }
@@ -247,13 +199,29 @@ contract StrategyACrypto is Strategy {
         address _token,
         uint256 _amount,
         address _to
-    ) override public {
+    ) public {
         require(msg.sender == govAddress, "!gov");
         require(_token != acsAddress, "!safe");
         require(_token != wantAddress, "!safe");
         require(_token != vaultAddress, "!safe");
 
         IERC20(_token).safeTransfer(_to, _amount);
+    }
+
+    function setWithdrawFee(uint256 _withdrawFeeNumer, uint256 _withdrawFeeDenom) external {
+        require(msg.sender == govAddress, "Not authorised");
+        require(_withdrawFeeDenom != 0, "denominator should not be 0");
+        require(_withdrawFeeNumer.mul(10) <= _withdrawFeeDenom, "numerator value too big");
+        withdrawFeeDenom = _withdrawFeeDenom;
+        withdrawFeeNumer = _withdrawFeeNumer;
+    }
+
+    function getProxyAdmin() public view returns (address adm) {
+        bytes32 slot = 0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103;
+        // solhint-disable-next-line no-inline-assembly
+        assembly {
+            adm := sload(slot)
+        }
     }
 
     receive() external payable {}
