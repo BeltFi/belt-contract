@@ -37,6 +37,9 @@ contract StrategyAlpacaImpl is StrategyAlpacaStorage {
         uint256 before = _stakedWantTokens();
         _deposit(_wantAmt);
         uint256 diff = _stakedWantTokens().sub(before);
+        if (diff > _wantAmt) {
+            diff = _wantAmt;
+        }
 
         balanceSnapshot = balanceSnapshot.add(diff);
 
@@ -47,6 +50,7 @@ contract StrategyAlpacaImpl is StrategyAlpacaStorage {
         if(isWbnb) {
             _unwrapBNB();
             Vault(vaultAddress).deposit{value: _wantAmt}(_wantAmt);
+            _wrapBNB();
         } else {
             Vault(vaultAddress).deposit(_wantAmt);
         }
@@ -94,14 +98,16 @@ contract StrategyAlpacaImpl is StrategyAlpacaStorage {
                 _wrapBNB();
             }
 
-            uint256 curWantBal = IERC20(wantAddress).balanceOf(address(this));
+            uint256 curWantBal = wantLockedInHere();
 
             if (curWantBal < buyBackAmt) {
                 _withdraw(buyBackAmt.sub(curWantBal));
                 if(isWbnb) {
                     _wrapBNB();
                 }
-                buyBackAmt = IERC20(wantAddress).balanceOf(address(this));
+                if (wantLockedInHere() < buyBackAmt) {
+                    buyBackAmt = wantLockedInHere();
+                }
             }
 
             IPancakeRouter02(uniRouterAddress).swapExactTokensForTokens(
@@ -149,24 +155,18 @@ contract StrategyAlpacaImpl is StrategyAlpacaStorage {
         ).div(withdrawFeeDenom);
         
         uint wantBal;
-        uint256 diff = _stakedWantTokens();
 
         if(_wantAmt > wantLockedInHere()) {
             _withdraw(_wantAmt.sub(
                 wantLockedInHere()
             ));
-            diff = diff.sub(
-                _stakedWantTokens()
-            );
-            wantBal = IERC20(wantAddress).balanceOf(address(this));
-        } else {
-            wantBal = _wantAmt;
-            diff = wantBal;
         }
-
+        
         if(isWbnb) {
             _wrapBNB();
         }
+
+        wantBal = IERC20(wantAddress).balanceOf(address(this));
         
         if (wantBal > _wantAmt) {
             wantBal = _wantAmt;
@@ -174,7 +174,7 @@ contract StrategyAlpacaImpl is StrategyAlpacaStorage {
 
         IERC20(wantAddress).safeTransfer(owner(), wantBal);
 
-        balanceSnapshot = balanceSnapshot.sub(diff);
+        balanceSnapshot = balanceSnapshot.sub(_wantAmt);
 
         return wantBal;
     }
@@ -280,6 +280,11 @@ contract StrategyAlpacaImpl is StrategyAlpacaStorage {
         require(_helper != address(0));
 
         bnbHelper = _helper;
+    }
+
+    function setPancakeRouterV2() public {
+        require(msg.sender == govAddress, "!gov");
+        uniRouterAddress = 0x10ED43C718714eb63d5aA57B78B54704E256024E;
     }
 
     fallback() external payable {}

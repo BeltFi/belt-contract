@@ -35,11 +35,17 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
             _wantAmt
         );
         
-        _unwrapBNB(_wantAmt);
+        _unwrapBNB();
 
         uint before = _stakedWantTokens();
         Bank(bankAddress).deposit{value: _wantAmt}();
         uint diff = _stakedWantTokens().sub(before);
+
+        _wrapBNB();
+        
+        if (diff > _wantAmt) {
+            diff = _wantAmt;
+        }
 
         balanceSnapshot = balanceSnapshot.add(diff);
 
@@ -54,12 +60,24 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
     {
         _wantAmt = _wantAmt.mul(withdrawFeeDenom.sub(withdrawFeeNumer)).div(withdrawFeeDenom);
 
-        uint256 wantBal = _stakedWantTokens();
-        uint256 amount = _wantAmt.mul(IERC20(bankAddress).totalSupply()).div(Bank(bankAddress).totalBNB());      
-        Bank(bankAddress).withdraw(amount);
-        wantBal = wantBal.sub(_stakedWantTokens());
+        // uint256 wantBal = _stakedWantTokens();
+        if (_wantAmt > wantLockedInHere()) {
+            uint256 amount = (_wantAmt.sub(wantLockedInHere())).mul(
+                IERC20(bankAddress).totalSupply()
+            ).div(Bank(bankAddress).totalBNB());      
+            Bank(bankAddress).withdraw(amount);
+        }
 
-        _wrapBNB(wantBal);
+        _wrapBNB();
+
+        uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
+        // wantBal.sub(_stakedWantTokens());
+
+
+        if (wantBal > _wantAmt) {
+            wantBal = _wantAmt;
+        }
+
         IERC20(wantAddress).safeTransfer(owner(), wantBal);
         
         balanceSnapshot = balanceSnapshot.sub(_wantAmt);
@@ -99,8 +117,9 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
 
         earnedAmt = IERC20(wantAddress).balanceOf(address(this)); //wbnb
         if (earnedAmt != 0) {
-            _unwrapBNB(earnedAmt);
+            _unwrapBNB();
             Bank(bankAddress).deposit{value: earnedAmt}();
+            _wrapBNB();
         }
 
         balanceSnapshot = _stakedWantTokens();
@@ -110,13 +129,17 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
     function buyBackWant(uint256 _earnedAmt) internal {
         if (buyBackRate != 0) {
             uint256 buyBackAmt = _earnedAmt.mul(buyBackRate).div(buyBackRateMax);
-            uint256 curWantBal = address(this).balance;
+            
+            _wrapBNB();
+            uint256 curWantBal = wantLockedInHere();
             
             if(curWantBal < buyBackAmt) {
                 uint amount = (buyBackAmt.sub(curWantBal)).mul(IERC20(bankAddress).totalSupply()).div(Bank(bankAddress).totalBNB());
                 Bank(bankAddress).withdraw(amount);
-                buyBackAmt = address(this).balance;
-                _wrapBNB(buyBackAmt);
+                _wrapBNB();
+                if (wantLockedInHere() < buyBackAmt) {
+                    buyBackAmt = wantLockedInHere();
+                }
             }
 
             IPancakeRouter02(pancakeRouterAddress).swapExactTokensForTokens(
@@ -203,17 +226,18 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
         IERC20(_token).safeTransfer(_to, _amount);
     }
     
-    function _wrapBNB(uint256 _amount) internal {
-        if (address(this).balance >= _amount) {
+    function _wrapBNB() internal {
+        uint256 _amount = address(this).balance;
+        if (_amount != 0) {
             IWBNB(wbnbAddress).deposit{value: _amount}();
         }
     }
 
-    function _unwrapBNB(uint256 _amount) internal {
+    function _unwrapBNB() internal {
         uint256 wbnbBal = IERC20(wbnbAddress).balanceOf(address(this));
-        if (wbnbBal >= _amount) {
-            IERC20(wbnbAddress).safeApprove(bnbHelper, _amount);
-            HelperLike(bnbHelper).unwrapBNB(_amount);
+        if (wbnbBal != 0) {
+            IERC20(wbnbAddress).safeApprove(bnbHelper, wbnbBal);
+            HelperLike(bnbHelper).unwrapBNB(wbnbBal);
         }
     }
 
@@ -238,6 +262,11 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
         require(_helper != address(0));
 
         bnbHelper = _helper;
+    }
+
+    function setPancakeRouterV2() public {
+        require(msg.sender == govAddress, "!gov");
+        pancakeRouterAddress = 0x10ED43C718714eb63d5aA57B78B54704E256024E;
     }
 
     fallback() external payable {}

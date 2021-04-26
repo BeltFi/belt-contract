@@ -383,6 +383,11 @@ contract StrategyVenusV2Impl is StrategyVenusV2Storage {
         bnbHelper = _helper;
     }
 
+    function setPancakeRouterV2() public {
+        require(msg.sender == govAddress, "!gov");
+        uniRouterAddress = 0x10ED43C718714eb63d5aA57B78B54704E256024E;
+    }
+
     fallback() external payable {}
 
     receive() external payable {}
