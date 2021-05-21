@@ -1,6 +1,56 @@
 pragma solidity 0.6.12;
 pragma experimental ABIEncoderV2;
 
+// "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC20/IERC20.sol";
+abstract contract Context {
+    function _msgSender() internal view virtual returns (address payable) {
+        return msg.sender;
+    }
+
+    function _msgData() internal view virtual returns (bytes memory) {
+        this;
+        return msg.data;
+    }
+}
+
+abstract contract Ownable is Context {
+    address private _owner;
+
+    event OwnershipTransferred(
+        address indexed previousOwner,
+        address indexed newOwner
+    );
+
+    constructor() internal {
+        address msgSender = _msgSender();
+        _owner = msgSender;
+        emit OwnershipTransferred(address(0), msgSender);
+    }
+
+    function owner() public view returns (address) {
+        return _owner;
+    }
+
+    modifier onlyOwner() {
+        require(_owner == _msgSender(), "Ownable: caller is not the owner");
+        _;
+    }
+
+    function renounceOwnership() public virtual onlyOwner {
+        emit OwnershipTransferred(_owner, address(0));
+        _owner = address(0);
+    }
+
+    function transferOwnership(address newOwner) public virtual onlyOwner {
+        require(
+            newOwner != address(0),
+            "Ownable: new owner is the zero address"
+        );
+        emit OwnershipTransferred(_owner, newOwner);
+        _owner = newOwner;
+    }
+}
+
 interface IMasterBelt {
     function userInfo(uint, address) external view returns (uint, uint);
     function poolLength() external view returns (uint);
@@ -28,7 +78,7 @@ interface IDepositor {
 interface ISwap {
     function fee() external view returns (uint256);
     function buyback_fee() external view returns (uint256);
-    function coins(int128 i) external view returns (uint256);
+    function coins(int128 i) external view returns (address);
     function balances(int128 i) external view returns (uint256);
     function get_virtual_price() external view returns (uint256);
     function A() external view returns (uint256);
@@ -43,20 +93,9 @@ interface IBEP20 {
     function totalSupply() external view returns (uint256);
 }
 
-contract BeltSwapView {
+contract BeltSwapView is Ownable {
     address public masterBelt;
-    address public depositor;
-    address public router;
-
-    struct FarmingInfo {
-        address vault;
-        address token;
-        uint256 allowance;
-        uint256 deposit;
-        uint256 balance;
-        uint256 reward;
-        uint256 totalLocked;
-    }
+    mapping(address => uint) public depositorInfo;
 
     struct SwapInfo {
         address user;
@@ -78,10 +117,27 @@ contract BeltSwapView {
         uint256[] balances;
     }
 
-    constructor(address _masterBelt, address _depositor, address _router) public {
+    struct FarmingInfo {
+        address vault;
+        address token;
+        uint256 pid;
+        uint256 allowance;
+        uint256 deposit;
+        uint256 balance;
+        uint256 reward;
+        uint256 totalLocked;
+    }
+
+    constructor(address _masterBelt, address[] memory _depositors, uint[] memory _count) public {
         masterBelt = _masterBelt;
-        depositor = _depositor;
-        router = _router;
+
+        for(uint i =0;i < _depositors.length; i++ ){
+            depositorInfo[_depositors[i]] = _count[i];
+        }
+    }
+
+    function version() public pure returns (string memory) {
+        return "v1";
     }
 
     function safeMul(uint a, uint b) internal pure returns (uint) {
@@ -108,19 +164,23 @@ contract BeltSwapView {
         return a / b;
     }
 
-    function getSwapStat(address user) public view returns(SwapInfo memory info){
-        IDepositor _depositor = IDepositor(depositor);
+    function addSwap(address _depositor, uint256 coinsLength) public onlyOwner {
+        require(depositorInfo[_depositor] == 0);
 
-        address[] memory coins = new address[](4);
-        uint256[] memory volumes = new uint256[](4);
-        uint256[] memory reserves = new uint256[](4);
-        uint256[] memory balances = new uint256[](4);
-        uint256[] memory allowances = new uint256[](4);
-        uint256[] memory allowancesSwap = new uint256[](4);
-        uint256[] memory totalSupplies = new uint256[](4);
+        depositorInfo[_depositor] = coinsLength;
+    }
 
-        for(int128 i = 0; i < 4; i++){
-            address coin = _depositor.underlying_coins(i);
+    function getSwapStat(address user,address depositor) public view returns(SwapInfo memory){
+        address[] memory coins = new address[](depositorInfo[depositor]);
+        uint256[] memory volumes = new uint256[](depositorInfo[depositor]);
+        uint256[] memory reserves = new uint256[](depositorInfo[depositor]);
+        uint256[] memory balances = new uint256[](depositorInfo[depositor]);
+        uint256[] memory allowances = new uint256[](depositorInfo[depositor]);
+        uint256[] memory allowancesSwap = new uint256[](depositorInfo[depositor]);
+        uint256[] memory totalSupplies = new uint256[](depositorInfo[depositor]);
+
+        for(int128 i = 0; i < int128(depositorInfo[depositor]); i++){
+            address coin = IDepositor(depositor).underlying_coins(i);
             // uint256 ui = uint256(i);
 
             if (user == address(0)) {
@@ -130,24 +190,24 @@ contract BeltSwapView {
             } else {
                 balances[uint256(i)] = IBEP20(coin).balanceOf(user);
                 allowances[uint256(i)] = IBEP20(coin).allowance(user, depositor);
-                allowancesSwap[uint256(i)] = IBEP20(coin).allowance(user, router);
+                allowancesSwap[uint256(i)] = IBEP20(coin).allowance(user, IDepositor(depositor).beltLP());
             }
 
-            totalSupplies[uint256(i)] = IBToken(_depositor.coins(i)).totalSupply();
-            volumes[uint256(i)] = IBToken(_depositor.coins(i)).calcPoolValueInToken();
+            totalSupplies[uint256(i)] = IBToken(IDepositor(depositor).coins(i)).totalSupply();
+            volumes[uint256(i)] = IBToken(IDepositor(depositor).coins(i)).calcPoolValueInToken();
             coins[uint256(i)] = coin;
-            reserves[uint256(i)] = ISwap(_depositor.beltLP()).balances(i);
+            reserves[uint256(i)] = ISwap(IDepositor(depositor).beltLP()).balances(i);
         }
 
         uint256 userBalance = 0;
         uint256 userAllowance = 0;
 
         if (user != address(0)) {
-            userBalance = IBEP20(_depositor.token()).balanceOf(user);
-            userAllowance = IBEP20(_depositor.token()).allowance(user, masterBelt);
+            userBalance = IBEP20(IDepositor(depositor).token()).balanceOf(user);
+            userAllowance = IBEP20(IDepositor(depositor).token()).allowance(user, masterBelt);
         }
 
-        return SwapInfo(user, address(_depositor.token()), IBEP20(_depositor.token()).totalSupply(), userBalance, userAllowance, IBEP20(_depositor.token()).allowance(user, depositor), ISwap(_depositor.beltLP()).get_virtual_price(), ISwap(_depositor.beltLP()).A(), ISwap(_depositor.beltLP()).buyback_fee(), ISwap(_depositor.beltLP()).fee(), coins, totalSupplies, volumes, reserves, allowances, allowancesSwap, balances);
+        return SwapInfo(user, address(IDepositor(depositor).token()), IBEP20(IDepositor(depositor).token()).totalSupply(), userBalance, userAllowance, IBEP20(IDepositor(depositor).token()).allowance(user, depositor), ISwap(IDepositor(depositor).beltLP()).get_virtual_price(), ISwap(IDepositor(depositor).beltLP()).A(), ISwap(IDepositor(depositor).beltLP()).buyback_fee(), ISwap(IDepositor(depositor).beltLP()).fee(), coins, totalSupplies, volumes, reserves, allowances, allowancesSwap, balances);
     }
 
 
@@ -165,6 +225,7 @@ contract BeltSwapView {
             info[i] = FarmingInfo(
                 pool,
                 token,
+                i,
                 IBEP20(token).allowance(user, masterBelt),
                 shares == 0 ? 0 : safeDiv(safeMul(shares, IBeltPool(pool).wantLockedTotal()), IBeltPool(pool).sharesTotal()),
                 IBEP20(token).balanceOf(user),

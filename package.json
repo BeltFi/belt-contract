@@ -1,7 +1,9 @@
 {
   "name": "belt-contract",
   "version": "1.0.0",
-  "dependencies": {},
+  "dependencies": {
+    "@openzeppelin/contracts": "3.4.1"
+  },
   "devDependencies": {
     "truffle-hdwallet-provider": "^1.0.17"
   }
