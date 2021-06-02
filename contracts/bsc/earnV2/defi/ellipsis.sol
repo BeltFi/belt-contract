@@ -26,10 +26,14 @@ interface StableSwap {
     
     // [BUSD, USDC, USDT]
     // function remove_liquidity(uint256 _amount, uint256[3] memory min_amount) external;
+    
+    function balances(uint256 i) external view returns (uint256);
 
     function remove_liquidity_one_coin(uint256 _token_amount, int128 i, uint256 min_amount) external;
 
     function calc_token_amount(uint256[3] memory amounts, bool deposit) external view returns (uint256);
+    
+    function get_virtual_price() external view returns(uint256);
 }
 
 interface LpTokenStaker {

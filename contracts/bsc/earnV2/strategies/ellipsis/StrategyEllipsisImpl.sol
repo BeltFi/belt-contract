@@ -28,16 +28,19 @@ contract StrategyEllipsisImpl is StrategyEllipsisStorage {
         uint256 before = eps3ToWant();
         _deposit(_wantAmt);
         uint256 diff = eps3ToWant().sub(before);
+        if (diff > _wantAmt) {
+            diff = _wantAmt;
+        }
         return diff;
     }
 
     function _deposit(uint256 _wantAmt) internal {
         uint256[3] memory depositArr;
         depositArr[getTokenIndex(wantAddress)] = _wantAmt;
-        require(isPoolSafe(), 'pool unsafe');
+        isPoolSafe();
         StableSwap(ellipsisSwapAddress).add_liquidity(depositArr, 0);
         LpTokenStaker(ellipsisStakeAddress).deposit(poolId, IERC20(eps3Address).balanceOf(address(this)));
-        require(isPoolSafe(), 'pool unsafe');
+        isPoolSafe();
     }
 
     function _depositAdditional(uint256 amount1, uint256 amount2, uint256 amount3) internal {
@@ -67,8 +70,8 @@ contract StrategyEllipsisImpl is StrategyEllipsisStorage {
     }
 
     function _withdraw(uint256 _wantAmt) internal {        
-        require(isPoolSafe(), 'pool unsafe');
-    	_wantAmt = _wantAmt.mul(
+        isPoolSafe();
+        _wantAmt = _wantAmt.mul(
             withdrawFeeDenom.sub(withdrawFeeNumer)
         ).div(withdrawFeeDenom);
 
@@ -81,7 +84,7 @@ contract StrategyEllipsisImpl is StrategyEllipsisStorage {
             getTokenIndexInt(wantAddress),
             0
         );
-        require(isPoolSafe(), 'pool unsafe');
+        isPoolSafe();
     }
 
     function earn() external whenNotPaused {
@@ -184,36 +187,28 @@ contract StrategyEllipsisImpl is StrategyEllipsisStorage {
     }
 
     function eps3ToWant() public view returns (uint256) {
-        uint256 busdBal = IERC20(busdAddress).balanceOf(ellipsisSwapAddress);
-        uint256 usdcBal = IERC20(usdcAddress).balanceOf(ellipsisSwapAddress);
-        uint256 usdtBal = IERC20(usdtAddress).balanceOf(ellipsisSwapAddress);
+        isPoolSafe();
         (uint256 curEps3Bal, )= LpTokenStaker(ellipsisStakeAddress).userInfo(poolId, address(this));
-        uint256 totEps3Bal = IERC20(eps3Address).totalSupply();
-        return busdBal.mul(curEps3Bal).div(totEps3Bal)
-            .add(
-                usdcBal.mul(curEps3Bal).div(totEps3Bal)
-            )
-            .add(
-                usdtBal.mul(curEps3Bal).div(totEps3Bal)
-            );
+        return curEps3Bal.mul(StableSwap(ellipsisSwapAddress).get_virtual_price()).div(1e18);
     }
 
-    function isPoolSafe() public view returns (bool) {
-        uint256 busdBal = IERC20(busdAddress).balanceOf(ellipsisSwapAddress);
-        uint256 usdcBal = IERC20(usdcAddress).balanceOf(ellipsisSwapAddress);
-        uint256 usdtBal = IERC20(usdtAddress).balanceOf(ellipsisSwapAddress);        
+    function isPoolSafe() public view {
+        // CHANGES: get balances of token in stableswap except admin_fee
+        uint256 busdBal = StableSwap(ellipsisSwapAddress).balances(getTokenIndex(busdAddress));
+        uint256 usdcBal = StableSwap(ellipsisSwapAddress).balances(getTokenIndex(usdcAddress));
+        uint256 usdtBal = StableSwap(ellipsisSwapAddress).balances(getTokenIndex(usdtAddress)); 
         uint256 most = busdBal > usdcBal ?
                 (busdBal > usdtBal ? busdBal : usdtBal) : 
                 (usdcBal > usdtBal ? usdcBal : usdtBal);
         uint256 least = busdBal < usdcBal ?
                 (busdBal < usdtBal ? busdBal : usdtBal) : 
                 (usdcBal < usdtBal ? usdcBal : usdtBal);
-        return most <= least.mul(safetyCoeffNumer).div(safetyCoeffDenom);
+
+        require(most <= least.mul(safetyCoeffNumer).div(safetyCoeffDenom), "StrategyEllipsis: pool unsafe");
     }
 
     function wantLockedTotal() public view returns (uint256) {
         return wantLockedInHere().add(
-            // balanceSnapshot
             eps3ToWant()
         );
     }
@@ -271,9 +266,12 @@ contract StrategyEllipsisImpl is StrategyEllipsisStorage {
         }
     }
 
-    function setPancakeRouterV2() public {
-        require(msg.sender == govAddress, "!gov");
-        pancakeRouterAddress = 0x10ED43C718714eb63d5aA57B78B54704E256024E;
+    function setEPSToWantPath(address[] memory newPath) public {
+        require(msg.sender == govAddress, "Not authorised");
+        EPSToWantPath = newPath;
+    }
+
+    function updateStrategy() public {
     }
 
     receive() external payable {}
