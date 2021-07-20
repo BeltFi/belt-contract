@@ -1,21 +1,39 @@
 pragma solidity 0.6.12;
 
-import "./SingleStrategyTokenStorage.sol";
+import "./StrategyTokenV2.sol";
+import "./SingleStrategyTokenStorageV2.sol";
 import "../../interfaces/Wrapped.sol";
 import "../../interfaces/IStrategy.sol";
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
-contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
+contract SingleStrategyTokenV2 is Initializable, StrategyTokenV2, SingleStrategyTokenStorageV2 {
     using SafeERC20 for IERC20;
-
+    
     event Deposit(address tokenAddress, uint256 depositAmount, uint256 sharesMinted);
     event Withdraw(address tokenAddress, uint256 withdrawAmount, uint256 sharesBurnt);
-    event DepositPause(address account, bool paused);
-    event WithdrawPause(address account, bool paused);
+    event Supply(uint256 amountSupplied, uint256 amountDeposited);
+    event EntranceFeeSet(uint256 numer, uint256 denom);
 
-    constructor () public ERC20("", "") {}
+    function __SingleStrategyTokenV2_init(
+        string memory name_,
+        string memory symbol_,
+        address _token,
+        address _strategy
+    ) public initializer {
+        __StrategyTokenV2_init(name_, symbol_, _token, msg.sender, 1, 1000);
+        __SingleStrategyTokenV2_init_unchained(_strategy);
+    }
+
+    function __SingleStrategyTokenV2_init_unchained(address _strategy) internal initializer {
+        strategy = _strategy;
+        approveToken();
+    }
+
+    function approveToken() public {
+        IERC20(token).safeApprove(strategy, uint(-1));
+    }
 
     function setGovAddress(address _govAddress) external {
         require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
@@ -26,56 +44,47 @@ contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
         require(!depositPaused, "deposit paused");
         require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         depositPaused = true;
-        emit DepositPause(msg.sender, true);
     }
 
     function unpauseDeposit() external {
         require(depositPaused, "deposit not paused");
         require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         depositPaused = false;
-        emit DepositPause(msg.sender, false);
     }
 
     function pauseWithdraw() external virtual {
         require(!withdrawPaused, "withdraw paused");
         require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         withdrawPaused = true;
-        emit WithdrawPause(msg.sender, true);
     }
 
     function unpauseWithdraw() external virtual {
         require(withdrawPaused, "withdraw not paused");
         require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         withdrawPaused = false;
-        emit WithdrawPause(msg.sender, false);
     }
 
     function depositBNB(uint256 _minShares) external payable {
         require(!depositPaused, "deposit paused");
-        require(isWbnb, "not bnb");
+        require(isWBNB, "not bnb");
         require(msg.value != 0, "deposit must be greater than 0");
-        _wrapBNB(msg.value);
         _deposit(msg.value, _minShares);
+        _wrapBNB(msg.value);
     }
 
     function deposit(uint256 _amount, uint256 _minShares) external {
         require(!depositPaused, "deposit paused");
         require(_amount != 0, "deposit must be greater than 0");
-        IERC20(token).safeTransferFrom(msg.sender, address(this), _amount);
         _deposit(_amount, _minShares);
+        IERC20(token).safeTransferFrom(msg.sender, address(this), _amount);
     }
 
     function _deposit(uint256 _amount, uint256 _minShares) internal nonReentrant {
         IStrategy(strategy).updateStrategy();
-        uint256 _pool = calcPoolValueInToken();
-        uint256 sharesToMint = IStrategy(strategy).deposit(_amount);
-        if (totalSupply() != 0 && _pool != 0) {
-            sharesToMint = (sharesToMint.mul(totalSupply()))
-            .div(_pool);
-        }
-        require(sharesToMint >= _minShares, "did not meet minimum shares requested");
-        _mint(msg.sender, sharesToMint);
-        emit Deposit(token, _amount, sharesToMint);
+        uint256 shares = amountToShares(_amount);
+        require(shares >= _minShares, "did not meet minimum shares requested");
+        _mint(msg.sender, shares);
+        emit Deposit(token, _amount, shares);
     }
 
     function withdraw(uint256 _shares, uint256 _minAmount) external {
@@ -84,7 +93,7 @@ contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
     }
 
     function withdrawBNB(uint256 _shares, uint256 _minAmount) external {
-        require(isWbnb, "not bnb");
+        require(isWBNB, "not bnb");
         uint256 r = _withdraw(_shares, _minAmount);
         _unwrapBNB(r);
         msg.sender.transfer(r);
@@ -101,16 +110,21 @@ contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
         uint256 ibalance = balanceOf(msg.sender);
         require(_shares <= ibalance, "insufficient balance");
 
-        IStrategy(strategy).updateStrategy();
+        updateStrategy();
         uint256 r = sharesToAmount(_shares);
         _burn(msg.sender, _shares);
 
-        r = IStrategy(strategy).withdraw(r);
+        uint256 b = balance();
+        if (b < r) {
+            // require(balanceStrategy() >= r.sub(b));
+            IStrategy(strategy).withdraw(r.sub(b));
+            r = balance();
+        }
 
         require(r >= _minAmount, "did not meet minimum amount requested");
-        
-        emit Withdraw(token, r, _shares);
 
+        emit Withdraw(token, r, _shares);
+        
         return r;
     }
 
@@ -122,10 +136,19 @@ contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
         return IStrategy(strategy).wantLockedTotal();        
     }
 
-    function calcPoolValueInToken() public view returns (uint) {
-        return balanceStrategy();
+    function supplyStrategy() public {
+        updateStrategy();
+        uint256 before = balance();
+        uint256 supplied = IStrategy(strategy).deposit(balance());
+        require(supplied >= before.mul(entranceFeeDenom.sub(entranceFeeNumer)).div(entranceFeeDenom), "Amount supplied too small");
+        emit Supply(before, supplied);
     }
-    
+
+    function calcPoolValueInToken() public view returns (uint) {
+        return balanceStrategy()
+            .add(balance());
+    }
+
     function updateStrategy() public {
         IStrategy(strategy).updateStrategy();
     }
@@ -146,10 +169,25 @@ contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
         if (totalSupply() == 0 || _pool == 0) {
             shares = _amount;
         } else {
+            //0.1%(999/1000) enterance fee
             shares = (_amount.mul(totalSupply()))
-                .div(_pool);
+            .mul(
+                entranceFeeDenom.sub(entranceFeeNumer)
+            )
+            .div(_pool)
+            .div(entranceFeeDenom);
         }
         return shares;
+    }
+
+    function setEntranceFee(uint256 _entranceFeeNumer, uint256 _entranceFeeDenom) external {
+        require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
+        require(_entranceFeeDenom != 0, "denominator should not be 0");
+        require(_entranceFeeNumer.mul(10) <= _entranceFeeDenom, "numerator value too big");
+        entranceFeeNumer = _entranceFeeNumer;
+        entranceFeeDenom = _entranceFeeDenom;
+
+        emit EntranceFeeSet(entranceFeeNumer, entranceFeeDenom);
     }
 
     function _wrapBNB(uint256 _amount) internal {
@@ -164,23 +202,6 @@ contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
             IERC20(wbnbAddress).safeApprove(bnbHelper, _amount);
             IUnwrapper(bnbHelper).unwrapBNB(_amount);
         }
-    }
-
-    function inCaseTokensGetStuck(
-        address _token,
-        uint256 _amount,
-        address _to
-    ) public {
-        require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
-        require(_token != address(this), "!safe");
-        if (_token == address(0)) {
-            require(address(this).balance >= _amount, "amount greater than holding");
-            _wrapBNB(_amount);
-            _token = wbnbAddress;
-        } else if (_token == token) { 
-            require(balance() >= _amount, "amount greater than holding");
-        }
-        IERC20(_token).safeTransfer(_to, _amount);
     }
 
     function getProxyAdmin() public view returns (address adm) {

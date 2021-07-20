@@ -1,21 +1,37 @@
 pragma solidity 0.6.12;
 
-import "./SingleStrategyTokenStorage.sol";
+import "./StrategyTokenV2.sol";
+import "./SingleStrategyTokenStorageV2.sol";
 import "../../interfaces/Wrapped.sol";
 import "../../interfaces/IStrategy.sol";
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
-contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
+contract SingleStrategyToken2V2 is Initializable, StrategyTokenV2, SingleStrategyTokenStorageV2 {
     using SafeERC20 for IERC20;
 
     event Deposit(address tokenAddress, uint256 depositAmount, uint256 sharesMinted);
     event Withdraw(address tokenAddress, uint256 withdrawAmount, uint256 sharesBurnt);
-    event DepositPause(address account, bool paused);
-    event WithdrawPause(address account, bool paused);
 
-    constructor () public ERC20("", "") {}
+    function __SingleStrategyToken2V2_init(
+        string memory name_,
+        string memory symbol_,
+        address _token,
+        address _strategy
+    ) public initializer {
+        __StrategyTokenV2_init(name_, symbol_, _token, msg.sender, 0, 1);
+        __SingleStrategyToken2V2_init_unchained(_strategy);
+    }
+
+    function __SingleStrategyToken2V2_init_unchained(address _strategy) internal initializer {
+        strategy = _strategy;
+        approveToken();
+    }
+
+    function approveToken() public {
+        IERC20(token).safeApprove(strategy, uint(-1));
+    }
 
     function setGovAddress(address _govAddress) external {
         require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
@@ -26,33 +42,29 @@ contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
         require(!depositPaused, "deposit paused");
         require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         depositPaused = true;
-        emit DepositPause(msg.sender, true);
     }
 
     function unpauseDeposit() external {
         require(depositPaused, "deposit not paused");
         require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         depositPaused = false;
-        emit DepositPause(msg.sender, false);
     }
 
     function pauseWithdraw() external virtual {
         require(!withdrawPaused, "withdraw paused");
         require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         withdrawPaused = true;
-        emit WithdrawPause(msg.sender, true);
     }
 
     function unpauseWithdraw() external virtual {
         require(withdrawPaused, "withdraw not paused");
         require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         withdrawPaused = false;
-        emit WithdrawPause(msg.sender, false);
     }
 
     function depositBNB(uint256 _minShares) external payable {
         require(!depositPaused, "deposit paused");
-        require(isWbnb, "not bnb");
+        require(isWBNB, "not bnb");
         require(msg.value != 0, "deposit must be greater than 0");
         _wrapBNB(msg.value);
         _deposit(msg.value, _minShares);
@@ -84,7 +96,7 @@ contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
     }
 
     function withdrawBNB(uint256 _shares, uint256 _minAmount) external {
-        require(isWbnb, "not bnb");
+        require(isWBNB, "not bnb");
         uint256 r = _withdraw(_shares, _minAmount);
         _unwrapBNB(r);
         msg.sender.transfer(r);

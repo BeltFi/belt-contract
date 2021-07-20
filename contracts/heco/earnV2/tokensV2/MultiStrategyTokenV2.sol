@@ -1,18 +1,20 @@
 pragma solidity 0.6.12;
 
-import "./MultiStrategyTokenStorage.sol";
+import "./StrategyTokenV2.sol";
+import "./MultiStrategyTokenStorageV2.sol";
 import "../../interfaces/Wrapped.sol";
 import "../../interfaces/IStrategyToken.sol";
 
+import "@openzeppelin/contracts-upgradeable/math/SafeMathUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
 
-contract MultiStrategyTokenImpl is MultiStrategyTokenStorage {
+contract MultiStrategyTokenV2 is Initializable, StrategyTokenV2, MultiStrategyTokenStorageV2 {
     using SafeERC20 for IERC20;
     using Address for address;
-    using SafeMath for uint256;
+    using SafeMathUpgradeable for uint256;
 
     event Deposit(address tokenAddress, uint256 depositAmount, uint256 sharesMinted, address strategyAddress);
     event Withdraw(address tokenAddress, uint256 withdrawAmount, uint256 sharesBurnt, address strategyAddress);
@@ -22,10 +24,54 @@ contract MultiStrategyTokenImpl is MultiStrategyTokenStorage {
     event RebalanceThresholdSet(uint256 numer, uint256 denom);
     event StrategyAdded(address strategyAddress);
     event StrategyRemoved(address strategyAddress);
-    event DepositPause(address account, bool paused);
-    event WithdrawPause(address account, bool paused);
+
+    function __MultiStrategyToken_init(
+        string memory name_,
+        string memory symbol_,
+        address _token,
+        address[] memory _strategies
+    ) public initializer {
+        __StrategyTokenV2_init(name_, symbol_, _token, msg.sender, 0, 1);
+        __MultiStrategyTokenV2_init_unchained(_strategies);
+    }
+
+    function __MultiStrategyTokenV2_init_unchained(
+        address[] memory _strategies
+    ) internal initializer {
+        // AUTOFARM
+        // ACRYPTOS
+        // ALPHAHOMORA
+        // FORTUBE
+        // VENUS
+        // ELLIPSIS
+        // ALPACA        
+        strategies = _strategies;
+        
+        uint256 i;
+        for (i = 0; i < strategies.length; i += 1) {
+            ratios[strategies[i]] = 1;
+            ratioTotal = ratioTotal.add(ratios[strategies[i]]);
+        }
+
+        for (i = 0; i < strategies.length; i += 1) {
+            depositActive[strategies[i]] = true;
+            withdrawActive[strategies[i]] = true;
+        }
+        depositActiveCount = strategies.length;        
+        withdrawActiveCount = strategies.length;
+
+        rebalanceThresholdNumer = 10;
+        rebalanceThresholdDenom = 100;
     
-    constructor () public ERC20("", ""){}
+        approveToken();
+    }
+
+    function approveToken() public {
+        uint i = 0;
+        for (; i < strategies.length; i += 1) {
+            IERC20(token).safeApprove(strategies[i], uint(-1));
+        }
+    }
 
     function setGovAddress(address _govAddress) external {
         require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
@@ -41,28 +87,24 @@ contract MultiStrategyTokenImpl is MultiStrategyTokenStorage {
         require(!depositPaused, "deposit paused");
         require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         depositPaused = true;
-        emit DepositPause(msg.sender, true);
     }
 
     function unpauseDeposit() external {
         require(depositPaused, "deposit not paused");
         require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         depositPaused = false;
-        emit DepositPause(msg.sender, false);
     }
 
     function pauseWithdraw() external virtual {
         require(!withdrawPaused, "withdraw paused");
         require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         withdrawPaused = true;
-        emit WithdrawPause(msg.sender, true);
     }
 
     function unpauseWithdraw() external virtual {
         require(withdrawPaused, "withdraw not paused");
         require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         withdrawPaused = false;
-        emit WithdrawPause(msg.sender, false);
     }
 
     function deposit(uint256 _amount, uint256 _minShares)
@@ -76,7 +118,7 @@ contract MultiStrategyTokenImpl is MultiStrategyTokenStorage {
 
     function depositBNB(uint256 _minShares) external payable {
         require(!depositPaused, "deposit paused");
-        require(isWbnb, "not bnb");
+        require(isWBNB, "not bnb");
         require(msg.value != 0, "deposit must be greater than 0");
         _wrapBNB(msg.value);
         _deposit(msg.value, _minShares);
@@ -115,7 +157,7 @@ contract MultiStrategyTokenImpl is MultiStrategyTokenStorage {
     function withdrawBNB(uint256 _shares, uint256 _minAmount)
         external
     {
-        require(isWbnb, "not bnb");
+        require(isWBNB, "not bnb");
         uint256 r = _withdraw(_shares, _minAmount);
         _unwrapBNB(r);
         msg.sender.transfer(r);
@@ -517,9 +559,9 @@ contract MultiStrategyTokenImpl is MultiStrategyTokenStorage {
         emit StrategyRemoved(strategyToRemove);
     }
 
-    function updateStrategyList() public {
-        require(msg.sender == govAddress || msg.sender == owner(), "!gov");
-    }
+    // function addMoreStrategies() public {
+    //     require(msg.sender == govAddress || msg.sender == owner(), "!gov");
+    // }
 
     fallback() external payable {}
     receive() external payable {}

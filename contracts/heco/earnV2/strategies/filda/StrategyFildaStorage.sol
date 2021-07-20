@@ -1,6 +1,6 @@
 pragma solidity 0.6.12;
 
-import "../Strategy.sol";
+import "../StrategyAlt.sol";
 
 abstract contract StrategyFildaStorage is Strategy {
     bool public isWHT = false;
