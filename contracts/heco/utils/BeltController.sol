@@ -329,10 +329,16 @@ contract BeltController is Initializable, OwnableUpgradeable, BeltControllerStor
 
 
     // strategyGovFunctions
-    // function updateStrategy() external;
     // function pause() external;
     // function unpause() external;
+    // function setbuyBackRate(uint256 _buyBackRate) external;
     // function setGov(address _govAddress) external;
+    // function setWithdrawFee(uint256 _withdrawFeeNumer, uint256 _withdrawFeeDenom) external;
+    // function inCaseTokensGetStuck(address _token, uint256 _amount, address _to) external;
+    // function setBNBHelper(address _helper) external;
+    
+
+
     function strategyUpdateStrategy(address addr) public onlyStrategy(addr) {
         IStrategy(addr).updateStrategy();
     }
@@ -369,6 +375,40 @@ contract BeltController is Initializable, OwnableUpgradeable, BeltControllerStor
         require(_govAddress != address(0));
         IStrategy(addr).setGov(_govAddress);
         emit StrategyGovSet(addr, _govAddress);
+    }
+
+    
+    function strategySetBuyBackRate(address addr, uint256 _buyBackRate) public onlyPolicyController onlyStrategy(addr) {
+        IStrategy(addr).setbuyBackRate(_buyBackRate);
+    }
+
+    function strategySetWithdrawFee(address addr, uint256 _withdrawFeeNumer, uint256 _withdrawFeeDenom) public onlyPolicyController onlyStrategy(addr) {
+        IStrategy(addr).setWithdrawFee(_withdrawFeeNumer, _withdrawFeeDenom);
+    }
+
+    function strategyInCaseTokensGetStuck(address addr, address _token, uint256 _amount, address _to) public onlyPolicyController onlyStrategy(addr) {
+        IStrategy(addr).inCaseTokensGetStuck(_token, _amount, _to);
+    }
+    
+    function strategySetBNBHelper(address addr, address _helper) public onlyPolicyController onlyStrategy(addr) {
+        IStrategy(addr).setBNBHelper(_helper);
+    }
+
+    // leverageStrategyGovFunc
+    // function setBorrowRate(uint256 _borrowRate) external;
+    // function setLeverageAdmin(address _leverageAdmin) external;
+    function strategySetBorrowRate(address addr, uint256 _borrowRate) public onlyPolicyController onlyStrategy(addr) {
+        ILeverageStrategy(addr).setBorrowRate(_borrowRate);
+    }
+
+    function strategySetLeverageAdmin(address addr, address _leverageAdmin) public onlyPolicyController onlyStrategy(addr) {
+        ILeverageStrategy(addr).setLeverageAdmin(_leverageAdmin);
+    }
+
+    function executeFunction (address addr, bytes memory exeData) public payable onlyOwner {
+        require(isStrategy(addr) || isStrategyToken(addr));
+        (bool result,) = addr.call{value: msg.value}(exeData);
+        require(result, "call to contract wasn't successful");
     }
 }
 

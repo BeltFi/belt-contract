@@ -3,23 +3,20 @@ pragma solidity 0.6.12;
 import "./StrategyLendHubStorage.sol";
 import "../../defi/lendHub.sol";
 import "../../defi/mdex.sol";
+import "../../../interfaces/Wrapped.sol";
 
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-interface IWHT is IERC20 {
-    function deposit() external payable;
-    function withdraw(uint wad) external;
-}
-
-interface HelperLike {
-    function unwrapBNB(uint256) external;
-}
 
 contract StrategyLendHubImpl is StrategyLendHubStorage {
     using SafeERC20 for IERC20;
     using Address for address;
     using SafeMath for uint256;
+
+    event Deposit(address wantAddress, uint256 amountReceived, uint256 amountDeposited);
+    event Withdraw(address wantAddress, uint256 amountRequested, uint256 amountWithdrawn);
+    event Buyback(address earnedAddress, uint256 earnedAmount, uint256 buybackAmount, address buybackTokenAddress, uint256 burnAmount, address buybackAddress);
 
     function _supply(uint256 _amount) internal {
         if (isWHT) {
@@ -79,6 +76,9 @@ contract StrategyLendHubImpl is StrategyLendHubStorage {
         if (diffBalance > _wantAmt) {
             diffBalance = _wantAmt;
         }
+
+        emit Deposit(wantAddress, _wantAmt, diffBalance);
+
         return diffBalance;
     }
 
@@ -140,20 +140,25 @@ contract StrategyLendHubImpl is StrategyLendHubStorage {
         );
 
         uint256 earnedAmt = IERC20(lhbAddress).balanceOf(address(this));
-        earnedAmt = buyBack(earnedAmt);
+        if (earnedAmt != 0) {
+            earnedAmt = buyBack(earnedAmt);
 
-        if (lhbAddress != wantAddress) {
-            IMdexRouter(mdexRouterAddress).swapExactTokensForTokens(
-                earnedAmt,
-                0,
-                lhbToWantPath,
-                address(this),
-                now.add(600)
-            );
+            if (lhbAddress != wantAddress) {
+                IMdexRouter(mdexRouterAddress).swapExactTokensForTokens(
+                    earnedAmt,
+                    0,
+                    lhbToWantPath,
+                    address(this),
+                    now.add(600)
+                );
+            }
+
         }
-
         lastEarnBlock = block.number;
-        _supply(wantLockedInHere());
+        earnedAmt = wantLockedInHere();
+        if (earnedAmt != 0) {
+            _supply(earnedAmt);
+        }
     }
 
     function buyBack(uint256 _earnedAmt) internal returns (uint256) {
@@ -173,6 +178,7 @@ contract StrategyLendHubImpl is StrategyLendHubStorage {
 
         uint256 burnAmt = IERC20(BELTAddress).balanceOf(address(this));
         IERC20(BELTAddress).safeTransfer(buyBackAddress, burnAmt);
+        emit Buyback(lhbAddress, _earnedAmt, buyBackAmt, BELTAddress, burnAmt, buyBackAddress);
 
         return _earnedAmt.sub(buyBackAmt);
     }
@@ -183,11 +189,22 @@ contract StrategyLendHubImpl is StrategyLendHubStorage {
         nonReentrant
         returns (uint256)
     {
-    	(uint256 sup, uint256 brw, uint256 supMin) = updateBalance();
         _wantAmt = _wantAmt.mul(
             withdrawFeeDenom.sub(withdrawFeeNumer)
         ).div(withdrawFeeDenom);
 
+        _withdraw(_wantAmt);
+
+        uint256 wantBal = wantLockedInHere();
+        IERC20(wantAddress).safeTransfer(owner(), wantBal);
+
+        emit Withdraw(wantAddress, _wantAmt, wantBal);
+        
+        return wantBal;
+    }
+
+    function _withdraw(uint256 _wantAmt) internal {
+    	(uint256 sup, uint256 brw, uint256 supMin) = updateBalance();
         uint256 delevAmtAvail = sup.sub(supMin);
         while (_wantAmt > delevAmtAvail) {
             if (delevAmtAvail > brw) {
@@ -207,18 +224,10 @@ contract StrategyLendHubImpl is StrategyLendHubStorage {
         }
 
         _removeSupply(_wantAmt);
-
-        uint256 wantBal = wantLockedInHere();
-        IERC20(wantAddress).safeTransfer(owner(), wantBal);
-        
-        return wantBal;
     }
 
-    function pause() public {
-        require(msg.sender == govAddress, "Not authorised");
-
-        _pause();
-
+    function _pause() override internal {
+        super._pause();
         IERC20(lhbAddress).safeApprove(mdexRouterAddress, 0);
         IERC20(wantAddress).safeApprove(mdexRouterAddress, 0);
         if (!isWHT) {
@@ -226,10 +235,13 @@ contract StrategyLendHubImpl is StrategyLendHubStorage {
         }
     }
 
-    function unpause() external {
+    function pause() public {
         require(msg.sender == govAddress, "Not authorised");
-        _unpause();
+        _pause();
+    }
 
+    function _unpause() override internal {
+        super._unpause();
         IERC20(lhbAddress).safeApprove(mdexRouterAddress, uint256(-1));
         IERC20(wantAddress).safeApprove(mdexRouterAddress, uint256(-1));
         if (!isWHT) {
@@ -237,6 +249,10 @@ contract StrategyLendHubImpl is StrategyLendHubStorage {
         }
     }
 
+    function unpause() external {
+        require(msg.sender == govAddress, "Not authorised");
+        _unpause();
+    }
 
     function updateBalance() public view returns (uint256 sup, uint256 brw, uint256 supMin) {
         (uint256 errCode, uint256 _sup, uint256 _brw, uint exchangeRate) = ILToken(lTokenAddress).getAccountSnapshot(address(this));
@@ -291,7 +307,7 @@ contract StrategyLendHubImpl is StrategyLendHubStorage {
         uint256 whtBal = IERC20(whtAddress).balanceOf(address(this));
         if (whtBal > 0) {
             IERC20(whtAddress).safeApprove(htHelper, whtBal);
-            HelperLike(htHelper).unwrapBNB(whtBal);
+            IUnwrapper(htHelper).unwrapBNB(whtBal);
         }
     }
 
@@ -342,7 +358,6 @@ contract StrategyLendHubImpl is StrategyLendHubStorage {
         require(msg.sender == govAddress, "Not authorized");
         leverageAdmin = _leverageAdmin;
     }
-
     fallback() external payable {}
 
     receive() external payable {}

@@ -17,3 +17,4 @@ abstract contract StrategyToken is ERC20, ReentrancyGuard, Ownable {
 
     bool public withdrawPaused;
 }
+
