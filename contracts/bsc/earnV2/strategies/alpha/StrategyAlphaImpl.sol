@@ -4,23 +4,25 @@ pragma solidity 0.6.12;
 import "./StrategyAlphaStorage.sol";
 import "../../defi/alphaHomora.sol";
 import "../../defi/pancake.sol";
+import "../../../interfaces/Wrapped.sol";
 
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-
-interface IWBNB is IERC20 {
-    function deposit() external payable;
-    function withdraw(uint256 wad) external;
-}
-
-interface HelperLike {
-    function unwrapBNB(uint256) external;
-}
 
 contract StrategyAlphaImpl is StrategyAlphaStorage {
     using SafeERC20 for IERC20;
     using Address for address;
     using SafeMath for uint256;
+    
+    event Deposit(address wantAddress, uint256 amountReceived, uint256 amountDeposited);
+    event Withdraw(address wantAddress, uint256 amountRequested, uint256 amountWithdrawn);
+    event BuybackWant(address wantAddress, uint256 earnedAmount, uint256 buybackAmount, address buybackTokenAddress, uint256 burnAmount, address buybackAddress);
+    event Buyback(address earnedAddress, uint256 earnedAmount, uint256 buybackAmount, address buybackTokenAddress, uint256 burnAmount, address buybackAddress);
+
+    modifier onlyEOA() {
+        require(tx.origin == msg.sender);
+        _;
+    }
 
     function deposit(uint256 _wantAmt)
         public
@@ -35,21 +37,25 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
             _wantAmt
         );
         
-        _unwrapBNB();
 
         uint before = _stakedWantTokens();
-        Bank(bankAddress).deposit{value: _wantAmt}();
+        _deposit(_wantAmt);
         uint diff = _stakedWantTokens().sub(before);
-
         _wrapBNB();
-        
         if (diff > _wantAmt) {
             diff = _wantAmt;
         }
 
         balanceSnapshot = balanceSnapshot.add(diff);
 
+        emit Deposit(wantAddress, _wantAmt, diff);
+
         return diff;
+    }
+
+    function _deposit(uint _wantAmt) internal {
+        _unwrapBNB();
+        Bank(bankAddress).deposit{value: _wantAmt}();
     }
 
     function withdraw(uint256 _wantAmt)
@@ -60,19 +66,11 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
     {
         _wantAmt = _wantAmt.mul(withdrawFeeDenom.sub(withdrawFeeNumer)).div(withdrawFeeDenom);
 
-        // uint256 wantBal = _stakedWantTokens();
         if (_wantAmt > wantLockedInHere()) {
-            uint256 amount = (_wantAmt.sub(wantLockedInHere())).mul(
-                IERC20(bankAddress).totalSupply()
-            ).div(Bank(bankAddress).totalBNB());      
-            Bank(bankAddress).withdraw(amount);
+            _withdraw(_wantAmt);
         }
 
-        _wrapBNB();
-
         uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
-        // wantBal.sub(_stakedWantTokens());
-
 
         if (wantBal > _wantAmt) {
             wantBal = _wantAmt;
@@ -82,7 +80,17 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
         
         balanceSnapshot = balanceSnapshot.sub(_wantAmt);
 
+        emit Withdraw(wantAddress, _wantAmt, wantBal);
+
         return wantBal;
+    }
+
+    function _withdraw(uint256 _wantAmt) internal {
+        uint256 amount = _wantAmt.sub(wantLockedInHere()).mul(
+            IERC20(bankAddress).totalSupply()
+        ).div(Bank(bankAddress).totalBNB());      
+        Bank(bankAddress).withdraw(amount);
+        _wrapBNB();
     }
 
     function _stakedWantTokens() public view returns (uint256) {
@@ -91,7 +99,7 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
         return _token.balanceOf(address(this)).mul(_totalBNB).div(_token.totalSupply());
     }
 
-    function earn() external whenNotPaused {
+    function earn() external whenNotPaused onlyEOA {
         uint earnedAmt = ALPHAToken(alphaAddress).balanceOf(address(this));
         if(earnedAmt != 0) {
             earnedAmt = buyBack(earnedAmt);
@@ -117,8 +125,7 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
 
         earnedAmt = IERC20(wantAddress).balanceOf(address(this)); //wbnb
         if (earnedAmt != 0) {
-            _unwrapBNB();
-            Bank(bankAddress).deposit{value: earnedAmt}();
+            _deposit(earnedAmt);
             _wrapBNB();
         }
 
@@ -134,9 +141,7 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
             uint256 curWantBal = wantLockedInHere();
             
             if(curWantBal < buyBackAmt) {
-                uint amount = (buyBackAmt.sub(curWantBal)).mul(IERC20(bankAddress).totalSupply()).div(Bank(bankAddress).totalBNB());
-                Bank(bankAddress).withdraw(amount);
-                _wrapBNB();
+                _withdraw(buyBackAmt.sub(curWantBal));
                 if (wantLockedInHere() < buyBackAmt) {
                     buyBackAmt = wantLockedInHere();
                 }
@@ -152,6 +157,7 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
 
             uint256 burnAmt = IERC20(BELTAddress).balanceOf(address(this));
             IERC20(BELTAddress).safeTransfer(buyBackAddress, burnAmt);
+            emit BuybackWant(wantAddress, _earnedAmt, buyBackAmt, BELTAddress, burnAmt, buyBackAddress);
         }
     }
 
@@ -172,25 +178,33 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
 
         uint256 burnAmt = IERC20(BELTAddress).balanceOf(address(this));
         IERC20(BELTAddress).safeTransfer(buyBackAddress, burnAmt);
+        emit Buyback(alphaAddress, _earnedAmt, buyBackAmt, BELTAddress, burnAmt, buyBackAddress);
 
         return _earnedAmt.sub(buyBackAmt);
     }
 
-    function pause() public {
-        require(msg.sender == govAddress, "Not authorised");
-
-        _pause();
+    function _pause() override internal {
+        super._pause();
 
         IERC20(alphaAddress).safeApprove(pancakeRouterAddress, 0);
         IERC20(wantAddress).safeApprove(pancakeRouterAddress, 0);
     }
 
-    function unpause() external {
+    function pause() public {
         require(msg.sender == govAddress, "Not authorised");
-        _unpause();
+        _pause();
+    }
+
+    function _unpause() override internal {
+        super._unpause();
 
         IERC20(alphaAddress).safeApprove(pancakeRouterAddress, uint256(-1));
         IERC20(wantAddress).safeApprove(pancakeRouterAddress, uint256(-1));
+    }
+
+    function unpause() external {
+        require(msg.sender == govAddress, "Not authorised");
+        _unpause();
     }
 
     function wantLockedTotal() public view returns (uint256) {
@@ -237,7 +251,7 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
         uint256 wbnbBal = IERC20(wbnbAddress).balanceOf(address(this));
         if (wbnbBal != 0) {
             IERC20(wbnbAddress).safeApprove(bnbHelper, wbnbBal);
-            HelperLike(bnbHelper).unwrapBNB(wbnbBal);
+            IUnwrapper(bnbHelper).unwrapBNB(wbnbBal);
         }
     }
 
@@ -264,10 +278,9 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
         bnbHelper = _helper;
     }
 
-    function setPancakeRouterV2() public {
-        require(msg.sender == govAddress, "!gov");
-        pancakeRouterAddress = 0x10ED43C718714eb63d5aA57B78B54704E256024E;
+    function updateStrategy() public {
     }
+
 
     fallback() external payable {}
     receive() external payable {}

@@ -3,26 +3,29 @@ pragma solidity 0.6.12;
 import "./StrategyFortubeStorage.sol";
 import "../../defi/fortube.sol";
 import "../../defi/pancake.sol";
+import "../../../interfaces/Wrapped.sol";
 
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-interface IWBNB is IERC20 {
-    function deposit() external payable;
-    function withdraw(uint wad) external;
-}
-
-interface HelperLike {
-    function unwrapBNB(uint256) external;
-}
 
 contract StrategyFortubeImpl is StrategyFortubeStorage {
     using SafeERC20 for IERC20;
     using Address for address;
     using SafeMath for uint256;
+    
+    event Deposit(address wantAddress, uint256 amountReceived, uint256 amountDeposited);
+    event Withdraw(address wantAddress, uint256 amountRequested, uint256 amountWithdrawn);
+    event Buyback(address earnedAddress, uint256 earnedAmount, uint256 buybackAmount, address buybackTokenAddress, uint256 burnAmount, address buybackAddress);
+
+    modifier onlyEOA() {
+        require(tx.origin == msg.sender);
+        _;
+    }
 
     function _supply(uint256 _amount) internal {
         if (isWBNB) {
+            _unwrapBNB();
             IBank(bankAddress).deposit{value: _amount}(0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB, _amount);
         } else {
             IBank(bankAddress).deposit(wantAddress, _amount);
@@ -32,6 +35,7 @@ contract StrategyFortubeImpl is StrategyFortubeStorage {
     function _removeSupply(uint256 _amount) internal {
         if (isWBNB) {
             IBank(bankAddress).withdrawUnderlying(0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB, _amount);
+            _wrapBNB();
         } else {
             IBank(bankAddress).withdrawUnderlying(wantAddress, _amount);
         }
@@ -40,6 +44,7 @@ contract StrategyFortubeImpl is StrategyFortubeStorage {
     function _borrow(uint256 _amount) internal {
         if (isWBNB) {
             IBank(bankAddress).borrow(0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB, _amount);
+            _wrapBNB();
         } else {
             IBank(bankAddress).borrow(wantAddress, _amount);
         }
@@ -47,6 +52,7 @@ contract StrategyFortubeImpl is StrategyFortubeStorage {
 
     function _repayBorrow(uint256 _amount) internal {
         if (isWBNB) {
+            _unwrapBNB();
             IBank(bankAddress).repay{value: _amount}(0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB, _amount);
         } else {
             IBank(bankAddress).repay(wantAddress, _amount);
@@ -60,9 +66,9 @@ contract StrategyFortubeImpl is StrategyFortubeStorage {
         whenNotPaused
         returns (uint256)
     {
-        updateBalance();
+        (uint256 sup, uint256 brw, ) = updateBalance();
 
-        uint prevBalance = wantLockedInHere().add(supplyBal).sub(borrowBal);
+        uint prevBalance = wantLockedInHere().add(sup).sub(brw);
 
         IERC20(wantAddress).safeTransferFrom(
             address(msg.sender),
@@ -70,132 +76,71 @@ contract StrategyFortubeImpl is StrategyFortubeStorage {
             _wantAmt
         );
 
-        _farm(true);
+        _supply(wantLockedInHere());
 
-        uint diffBalance = wantLockedInHere().add(supplyBal).sub(borrowBal).sub(prevBalance);
+        (sup, brw, ) = updateBalance();
+        uint diffBalance = wantLockedInHere().add(sup).sub(brw).sub(prevBalance);
+        if (diffBalance > _wantAmt) {
+            diffBalance = _wantAmt;
+        }
+
+        emit Deposit(wantAddress, _wantAmt, diffBalance);
+        
         return diffBalance;
     }
 
-    function farm(bool _withLev) public nonReentrant {
-        _farm(_withLev);
+    function leverage(uint256 _amount) public {
+        require(govAddress == msg.sender || leverageAdmin == msg.sender, "Not authorized");
+        _leverage(_amount);
     }
 
-    function _farm(bool _withLev) internal {
-        if(wantLockedInHere() > 1e18){
-            if (isWBNB) {
-                _unwrapBNB();
-                _leverage(address(this).balance, _withLev);
-            } else {
-                _leverage(wantLockedInHere(), _withLev);
-            }
-        }
-        else{
-            if (isWBNB) {
-                _unwrapBNB();
-                _leverage(address(this).balance, false);
-            } else {
-                _leverage(wantLockedInHere(), false);
-            }
-        }
+    function _leverage(uint256 _amount) internal {
+        updateStrategy();
+        (uint256 sup, uint256 brw, ) = updateBalance();
 
-        updateBalance();
-
-        deleverageUntilNotOverLevered();
+        require(
+            brw.add(_amount).mul(1000).div(borrowRate) <= sup, "ltv too high"
+        );
+        _borrow(_amount);
+        _supply(wantLockedInHere());
     }
 
-    function _leverage(uint256 _amount, bool _withLev) internal {
-        if (_withLev) {
-            for (uint256 i = 0; i < borrowDepth; i++) {
-                _supply(_amount);
-                _amount = _amount.mul(borrowRate).div(1000);
-                _borrow(_amount);
-            }
-        }
-
-        _supply(_amount);
+    function deleverage(uint256 _amount) public {
+        require(govAddress == msg.sender || leverageAdmin == msg.sender, "Not authorized");
+        _deleverage(_amount);
     }
 
-    function deleverageOnce() public {
-        updateBalance();
-
-        if (supplyBal <= supplyBalTargeted) {
-            _removeSupply(supplyBal.sub(supplyBalMin));
-        } else {
-            _removeSupply(supplyBal.sub(supplyBalTargeted));
-        }
-
-        if (isWBNB) {
-            _unwrapBNB();
-            _repayBorrow(address(this).balance);
-        } else {
-            _repayBorrow(wantLockedInHere());
-        }
-
-        updateBalance();
+    function deleverageAll(uint256 redeemFeeAmt) public {
+        require(govAddress == msg.sender || leverageAdmin == msg.sender, "Not authorized");
+        updateStrategy();
+        (uint256 sup, uint256 brw, uint256 supMin) = updateBalance();
+        require(brw.add(redeemFeeAmt) <= sup.sub(supMin), "amount too big");
+        _removeSupply(brw.add(redeemFeeAmt));
+        _repayBorrow(brw);
+        _supply(wantLockedInHere());
     }
 
-    function deleverageUntilNotOverLevered() public {
-        while (supplyBal > 0 && supplyBal <= supplyBalTargeted) {
-            deleverageOnce();
-        }
+    function _deleverage(uint256 _amount) internal {
+        updateStrategy();
+        (uint256 sup, uint256 brw, uint256 supMin) = updateBalance();
+
+        require(_amount <= sup.sub(supMin), "amount too big");
+        require(_amount <= brw, "amount too big");
+
+        _removeSupply(_amount);
+        _repayBorrow(wantLockedInHere());
+
     }
 
-
-    function _deleverage(bool _delevPartial, uint256 _amt, uint256 _minAmt) internal {
-        updateBalance();
-
-        deleverageUntilNotOverLevered();
-
-        if (isWBNB) {
-            _wrapBNB();
-        }
-
-        if (_amt <= supplyBal.sub(supplyBalMin)) {
-            _removeSupply(_amt);
-        } else {
-            revert("no leverage allowed");
-        }
-
-        uint256 wantBal = wantLockedInHere();
-
-        while (wantBal < borrowBal) {
-
-            if (_delevPartial && wantBal >= _minAmt) {
-                return;
-            }
-
-            _repayBorrow(wantBal);
-
-            updateBalance();
-
-            _removeSupply(supplyBal.sub(supplyBalMin));
-
-            wantBal = wantLockedInHere();
-        }
-
-
-        if (_delevPartial && wantBal >= _minAmt) {
-            return;
-        }
-
-        revert("no leverage allowed");
-    }
-
-    function rebalance(uint256 _borrowRate, uint256 _borrowDepth) external {
+    function setBorrowRate(uint256 _borrowRate) external {
         require(msg.sender == govAddress, "Not authorised");
-
-        require(_borrowRate <= BORROW_RATE_MAX, "!rate");
-        require(_borrowRate != 0, "borrowRate is used as a divisor");
-        require(_borrowDepth <= BORROW_DEPTH_MAX, "!depth");
-
-        _deleverage(false, uint256(-1), uint256(-1));
+        updateStrategy();
         borrowRate = _borrowRate;
-        borrowDepth = _borrowDepth;
-        _farm(true);
+        (uint256 sup, , uint256 supMin) = updateBalance();
+        require(sup >= supMin, "supply should be greater than min supply");
     }
 
-    function earn() external whenNotPaused {
-    	updateBalance();
+    function earn() external whenNotPaused onlyEOA {
         if (IMiningReward(forDistributionAddress).checkBalance(address(this)) > 0) {
             IMiningReward(forDistributionAddress).claimReward();
 
@@ -211,9 +156,10 @@ contract StrategyFortubeImpl is StrategyFortubeStorage {
                     now.add(600)
                 );
             }
-
-            lastEarnBlock = block.number;
-            _farm(false);
+        }
+        lastEarnBlock = block.number;
+        if (wantLockedInHere() != 0) {
+            _supply(wantLockedInHere());
         }
     }
 
@@ -234,6 +180,7 @@ contract StrategyFortubeImpl is StrategyFortubeStorage {
 
         uint256 burnAmt = IERC20(BELTAddress).balanceOf(address(this));
         IERC20(BELTAddress).safeTransfer(buyBackAddress, burnAmt);
+        emit Buyback(forAddress, _earnedAmt, buyBackAmt, BELTAddress, burnAmt, buyBackAddress);
 
         return _earnedAmt.sub(buyBackAmt);
     }
@@ -244,72 +191,87 @@ contract StrategyFortubeImpl is StrategyFortubeStorage {
         nonReentrant
         returns (uint256)
     {
-    	updateBalance();
-
-        uint256 _wantAmtWithFee = _wantAmt;
         _wantAmt = _wantAmt.mul(
             withdrawFeeDenom.sub(withdrawFeeNumer)
         ).div(withdrawFeeDenom);
 
-        uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
-        if (wantBal < _wantAmt) {
-            _deleverage(true, _wantAmtWithFee, _wantAmt);
-            if (isWBNB) {
-                _wrapBNB();
-            }
-            wantBal = IERC20(wantAddress).balanceOf(address(this));
-        }
+        _withdraw(_wantAmt);
 
-        if (wantBal < _wantAmt) {
-            _wantAmt = wantBal;
-        }
+        uint256 wantBal = wantLockedInHere();
+        IERC20(wantAddress).safeTransfer(owner(), wantBal);
 
-        IERC20(wantAddress).safeTransfer(owner(), _wantAmt);
-
-        _farm(true);
-
-        return _wantAmt;
+        emit Withdraw(wantAddress, _wantAmt, wantBal);
+        
+        return wantBal;
     }
 
-    function pause() public {
-        require(msg.sender == govAddress, "Not authorised");
+    function _withdraw(uint256 _wantAmt) internal {
+        uint256 sup;
+        uint256 brw;
+        uint256 supMin;
+    	(sup, brw, supMin) = updateBalance();
 
-        _pause();
+        uint256 delevAmtAvail = sup.sub(supMin);
+        while (_wantAmt > delevAmtAvail) {
+            if (delevAmtAvail > brw) {
+                _deleverage(brw);
+                (sup, brw, supMin) = updateBalance();
+                delevAmtAvail = sup.sub(supMin);
+                break;  
+            } else {
+                _deleverage(delevAmtAvail);
+            }
+            (sup, brw, supMin) = updateBalance();
+            delevAmtAvail = sup.sub(supMin);
+        }
 
+        if (_wantAmt > delevAmtAvail) {
+            _wantAmt = delevAmtAvail;
+        }
+
+        _removeSupply(_wantAmt);
+    }
+
+    function _pause() override internal {
+        super._pause();
         IERC20(forAddress).safeApprove(uniRouterAddress, 0);
         IERC20(wantAddress).safeApprove(uniRouterAddress, 0);
         IERC20(wantAddress).safeApprove(bankControllerAddress, 0);
     }
 
-    function unpause() external {
+    function pause() public {
         require(msg.sender == govAddress, "Not authorised");
-        _unpause();
+        _pause();
+    }
 
+    function _unpause() override internal {
+        super._unpause();
         IERC20(forAddress).safeApprove(uniRouterAddress, uint256(-1));
         IERC20(wantAddress).safeApprove(uniRouterAddress, uint256(-1));
         IERC20(wantAddress).safeApprove(bankControllerAddress, uint256(-1));
     }
 
+    function unpause() external {
+        require(msg.sender == govAddress, "Not authorised");
+        _unpause();
+    }
 
-    function updateBalance() public {
-        supplyBal = IFToken(fTokenAddress).calcBalanceOfUnderlying(address(this));
-        borrowBal = IFToken(fTokenAddress).borrowBalanceStored(address(this));
-        supplyBalTargeted = borrowBal.mul(1000).div(borrowRate);
-        supplyBalMin = borrowBal.mul(1000).div(BORROW_RATE_MAX_HARD);
+
+    function updateBalance() public view returns (uint256 sup, uint256 brw, uint256 supMin) {
+        sup = IFToken(fTokenAddress).calcBalanceOfUnderlying(address(this));
+        brw = IFToken(fTokenAddress).borrowBalanceStored(address(this));
+
+        supMin = brw.mul(1000).div(borrowRate);
     }
 
     function wantLockedTotal() public view returns (uint256) {
-        return wantLockedInHere().add(supplyBal).sub(borrowBal);
+        (uint256 sup, uint256 brw, ) = updateBalance();
+        return wantLockedInHere().add(sup).sub(brw);
     }
 
     function wantLockedInHere() public view returns (uint256) {
         uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
-        if (isWBNB) {
-            uint256 bnbBal = address(this).balance;
-            return bnbBal.add(wantBal);
-        } else {
-            return wantBal;
-        }
+        return wantBal;
     }
 
     function setbuyBackRate(uint256 _buyBackRate) public {
@@ -347,7 +309,7 @@ contract StrategyFortubeImpl is StrategyFortubeStorage {
         uint256 wbnbBal = IERC20(wbnbAddress).balanceOf(address(this));
         if (wbnbBal > 0) {
             IERC20(wbnbAddress).safeApprove(bnbHelper, wbnbBal);
-            HelperLike(bnbHelper).unwrapBNB(wbnbBal);
+            IUnwrapper(bnbHelper).unwrapBNB(wbnbBal);
         }
     }
 
@@ -380,9 +342,60 @@ contract StrategyFortubeImpl is StrategyFortubeStorage {
         bnbHelper = _helper;
     }
 
-    function setPancakeRouterV2() public {
+    function setForToWantPath(address[] memory newPath) public {
+        require(msg.sender == govAddress, "Not authorised");
+        forToWantPath = newPath;
+    }
+
+    function updateStrategy() public {
+        _supply(0);
+    }
+
+    function setLeverageAdmin(address _leverageAdmin) external {
+        require(msg.sender == govAddress, "Not authorized");
+        leverageAdmin = _leverageAdmin;
+    }
+
+    function resetUnusedVars() public {
         require(msg.sender == govAddress, "!gov");
-        uniRouterAddress = 0x10ED43C718714eb63d5aA57B78B54704E256024E;
+        borrowDepth = 0;
+        supplyBal = 0;
+        borrowBal = 0; 
+        supplyBalTargeted = 0; 
+        supplyBalMin = 0; 
+    }
+
+    function migrateTo(address targetAddress) internal {
+        require(wantAddress != address(0));
+
+        // claim for if there is any
+        // fToken transfer
+        // wantToken transfer if there is any
+        // for transfer
+
+        if (IMiningReward(forDistributionAddress).checkBalance(address(this)) > 0) {
+            IMiningReward(forDistributionAddress).claimReward();
+        }
+
+        uint256 fTokenBalance = IFToken(fTokenAddress).balanceOf(address(this));
+        // fToken should not use safe transfer
+        require(IFToken(fTokenAddress).transfer(targetAddress, fTokenBalance));
+        if (isWBNB) {
+            _wrapBNB();
+        }
+        
+        uint256 wantBalance = IERC20(wantAddress).balanceOf(address(this));
+        IERC20(wantAddress).safeTransfer(targetAddress, wantBalance);
+
+        uint256 forBalance = IERC20(forAddress).balanceOf(address(this));
+        IERC20(forAddress).safeTransfer(targetAddress, forBalance);
+
+        wantAddress = address(0);
+    }
+
+    function migrateToV2() public {
+        require(msg.sender == govAddress, "!gov");
+        
     }
 
     fallback() external payable {}

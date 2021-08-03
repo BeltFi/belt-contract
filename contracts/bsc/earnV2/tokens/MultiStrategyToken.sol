@@ -24,7 +24,10 @@ contract MultiStrategyToken is MultiStrategyTokenStorage, TransparentUpgradeable
         // FORTUBE
         // VENUS
         // ELLIPSIS
-        // ALPACA
+        // ALPACA        
+        ERC20._setupDecimals(
+            ERC20(_token).decimals()
+        );
         
         govAddress = msg.sender;
 

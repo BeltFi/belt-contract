@@ -24,6 +24,10 @@ contract SingleStrategyToken is SingleStrategyTokenStorage, TransparentUpgradeab
         entranceFeeNumer = 1;
         entranceFeeDenom = 1000;
 
+        ERC20._setupDecimals(
+            ERC20(_token).decimals()
+        );
+
         isWbnb = token == wbnbAddress;
 
         approveToken();

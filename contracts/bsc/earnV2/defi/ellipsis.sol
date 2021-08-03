@@ -25,7 +25,7 @@ interface StableSwap {
     function add_liquidity(uint256[3] memory amounts, uint256 min_mint_amount) external;
     
     // [BUSD, USDC, USDT]
-    // function remove_liquidity(uint256 _amount, uint256[3] memory min_amount) external;
+    function remove_liquidity(uint256 _amount, uint256[3] memory min_amount) external;
     
     function balances(uint256 i) external view returns (uint256);
 

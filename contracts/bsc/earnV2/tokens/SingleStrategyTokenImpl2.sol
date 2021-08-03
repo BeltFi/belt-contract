@@ -1,65 +1,56 @@
 pragma solidity 0.6.12;
 
 import "./SingleStrategyTokenStorage.sol";
+import "../../interfaces/Wrapped.sol";
+import "../../interfaces/IStrategy.sol";
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 
-interface StrategyLike {
-    function wantLockedTotal() external view returns (uint256);
-
-    function wantLockedInHere() external view returns (uint256);
-    
-    function deposit(uint256 _wantAmt) external returns (uint256);
-
-    function withdraw(uint256 _wantAmt) external returns (uint256);
-}
-
-interface IWBNB is IERC20 {
-    function deposit() external payable;
-
-    function withdraw(uint wad) external;
-}
-
-interface HelperLike {
-    function unwrapBNB(uint256) external;
-}
-
 contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
     using SafeERC20 for IERC20;
+
+    event Deposit(address tokenAddress, uint256 depositAmount, uint256 sharesMinted);
+    event Withdraw(address tokenAddress, uint256 withdrawAmount, uint256 sharesBurnt);
+    event DepositPause(address account, bool paused);
+    event WithdrawPause(address account, bool paused);
 
     constructor () public ERC20("", "") {}
 
     function setGovAddress(address _govAddress) external {
-        require(msg.sender == govAddress, "Not authorized");
+        require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         govAddress = _govAddress;
     }
 
     function pauseDeposit() external {
         require(!depositPaused, "deposit paused");
-        require(msg.sender == govAddress, "Not authorized");
+        require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         depositPaused = true;
+        emit DepositPause(msg.sender, true);
     }
 
     function unpauseDeposit() external {
         require(depositPaused, "deposit not paused");
-        require(msg.sender == govAddress, "Not authorized");
+        require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         depositPaused = false;
+        emit DepositPause(msg.sender, false);
     }
 
     function pauseWithdraw() external virtual {
         require(!withdrawPaused, "withdraw paused");
-        require(msg.sender == govAddress, "Not authorized");
+        require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         withdrawPaused = true;
+        emit WithdrawPause(msg.sender, true);
     }
 
     function unpauseWithdraw() external virtual {
         require(withdrawPaused, "withdraw not paused");
-        require(msg.sender == govAddress, "Not authorized");
+        require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         withdrawPaused = false;
+        emit WithdrawPause(msg.sender, false);
     }
 
-    function depositBnb(uint256 _minShares) external payable {
+    function depositBNB(uint256 _minShares) external payable {
         require(!depositPaused, "deposit paused");
         require(isWbnb, "not bnb");
         require(msg.value != 0, "deposit must be greater than 0");
@@ -74,15 +65,17 @@ contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
         _deposit(_amount, _minShares);
     }
 
-    function _deposit(uint256 _amount, uint256 _minShares) internal {
+    function _deposit(uint256 _amount, uint256 _minShares) internal nonReentrant {
+        IStrategy(strategy).updateStrategy();
         uint256 _pool = calcPoolValueInToken();
-        uint256 sharesToMint = StrategyLike(strategy).deposit(_amount);
+        uint256 sharesToMint = IStrategy(strategy).deposit(_amount);
         if (totalSupply() != 0 && _pool != 0) {
             sharesToMint = (sharesToMint.mul(totalSupply()))
             .div(_pool);
         }
         require(sharesToMint >= _minShares, "did not meet minimum shares requested");
         _mint(msg.sender, sharesToMint);
+        emit Deposit(token, _amount, sharesToMint);
     }
 
     function withdraw(uint256 _shares, uint256 _minAmount) external {
@@ -108,13 +101,16 @@ contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
         uint256 ibalance = balanceOf(msg.sender);
         require(_shares <= ibalance, "insufficient balance");
 
+        IStrategy(strategy).updateStrategy();
         uint256 r = sharesToAmount(_shares);
         _burn(msg.sender, _shares);
 
-        r = StrategyLike(strategy).withdraw(r);
+        r = IStrategy(strategy).withdraw(r);
 
         require(r >= _minAmount, "did not meet minimum amount requested");
         
+        emit Withdraw(token, r, _shares);
+
         return r;
     }
 
@@ -123,16 +119,20 @@ contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
     }
 
     function balanceStrategy() public view returns (uint256) {
-        return StrategyLike(strategy).wantLockedTotal();        
+        return IStrategy(strategy).wantLockedTotal();        
     }
 
     function calcPoolValueInToken() public view returns (uint) {
         return balanceStrategy();
     }
+    
+    function updateStrategy() public {
+        IStrategy(strategy).updateStrategy();
+    }
 
     function getPricePerFullShare() public view returns (uint) {
         uint256 _pool = calcPoolValueInToken();
-        return _pool.mul(uint256(10) ** uint256(decimals())).div(totalSupply());
+        return _pool.mul(1e18).div(totalSupply());
     }
 
     function sharesToAmount(uint256 _shares) public view returns (uint256) {
@@ -162,7 +162,7 @@ contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
         uint256 wbnbBal = IERC20(wbnbAddress).balanceOf(address(this));
         if (wbnbBal >= _amount) {
             IERC20(wbnbAddress).safeApprove(bnbHelper, _amount);
-            HelperLike(bnbHelper).unwrapBNB(_amount);
+            IUnwrapper(bnbHelper).unwrapBNB(_amount);
         }
     }
 
@@ -171,11 +171,12 @@ contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
         uint256 _amount,
         address _to
     ) public {
-        require(msg.sender == govAddress, "!gov");
+        require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         require(_token != address(this), "!safe");
         if (_token == address(0)) {
             require(address(this).balance >= _amount, "amount greater than holding");
             _wrapBNB(_amount);
+            _token = wbnbAddress;
         } else if (_token == token) { 
             require(balance() >= _amount, "amount greater than holding");
         }
@@ -191,10 +192,20 @@ contract SingleStrategyTokenImpl2 is SingleStrategyTokenStorage {
     }
 
     function setBNBHelper(address _helper) public {
-        require(msg.sender == govAddress, "!gov");
+        require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
         require(_helper != address(0));
 
         bnbHelper = _helper;
+    }
+
+    function _setNewStrategy(address newStrategyAddr) internal {
+        require(newStrategyAddr != address(0));
+        require(newStrategyAddr != strategy);
+        strategy = newStrategyAddr;
+    }
+
+    function setNewStrategy() external {
+        require(msg.sender == govAddress || msg.sender == owner(), "Not authorized");
     }
 
     fallback() external payable {}

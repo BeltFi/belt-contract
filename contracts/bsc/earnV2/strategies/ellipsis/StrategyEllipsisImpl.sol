@@ -12,6 +12,15 @@ contract StrategyEllipsisImpl is StrategyEllipsisStorage {
     using Address for address;
     using SafeMath for uint256;
 
+    event Deposit(address wantAddress, uint256 amountReceived, uint256 amountDeposited);
+    event Withdraw(address wantAddress, uint256 amountRequested, uint256 amountWithdrawn);
+    event Buyback(address earnedAddress, uint256 earnedAmount, uint256 buybackAmount, address buybackTokenAddress, uint256 burnAmount, address buybackAddress);
+
+    modifier onlyEOA() {
+        require(tx.origin == msg.sender);
+        _;
+    }
+
     function deposit(uint256 _wantAmt)
         public
         onlyOwner
@@ -31,16 +40,19 @@ contract StrategyEllipsisImpl is StrategyEllipsisStorage {
         if (diff > _wantAmt) {
             diff = _wantAmt;
         }
+
+        emit Deposit(wantAddress, _wantAmt, diff);
+
         return diff;
     }
 
     function _deposit(uint256 _wantAmt) internal {
         uint256[3] memory depositArr;
         depositArr[getTokenIndex(wantAddress)] = _wantAmt;
-        isPoolSafe();
+        require(isPoolSafe(), "StrategyEllipsis: pool unsafe");
         StableSwap(ellipsisSwapAddress).add_liquidity(depositArr, 0);
         LpTokenStaker(ellipsisStakeAddress).deposit(poolId, IERC20(eps3Address).balanceOf(address(this)));
-        isPoolSafe();
+        require(isPoolSafe(), "StrategyEllipsis: pool unsafe");
     }
 
     function _depositAdditional(uint256 amount1, uint256 amount2, uint256 amount3) internal {
@@ -66,11 +78,14 @@ contract StrategyEllipsisImpl is StrategyEllipsisStorage {
         _withdraw(_wantAmt);
         wantBal = IERC20(wantAddress).balanceOf(address(this)).sub(wantBal);
         IERC20(wantAddress).safeTransfer(owner(), wantBal);
+
+        emit Withdraw(wantAddress, _wantAmt, wantBal);
+
         return wantBal;
     }
 
-    function _withdraw(uint256 _wantAmt) internal {        
-        isPoolSafe();
+    function _withdraw(uint256 _wantAmt) internal {
+        require(isPoolSafe(), "StrategyEllipsis: pool unsafe");
         _wantAmt = _wantAmt.mul(
             withdrawFeeDenom.sub(withdrawFeeNumer)
         ).div(withdrawFeeDenom);
@@ -84,10 +99,10 @@ contract StrategyEllipsisImpl is StrategyEllipsisStorage {
             getTokenIndexInt(wantAddress),
             0
         );
-        isPoolSafe();
+        require(isPoolSafe(), "StrategyEllipsis: pool unsafe");
     }
 
-    function earn() external whenNotPaused {
+    function earn() external whenNotPaused onlyEOA {
         uint256 earnedAmt;
         LpTokenStaker(ellipsisStakeAddress).withdraw(poolId, 0);
         FeeDistribution(ellipsisDistibAddress).exit();
@@ -136,15 +151,13 @@ contract StrategyEllipsisImpl is StrategyEllipsisStorage {
 
         uint256 burnAmt = IERC20(BELTAddress).balanceOf(address(this));
         IERC20(BELTAddress).safeTransfer(buyBackAddress, burnAmt);
+        emit Buyback(epsAddress, _earnedAmt, buyBackAmt, BELTAddress, burnAmt, buyBackAddress);
 
         return _earnedAmt.sub(buyBackAmt);
     }
 
-    function pause() public {
-        require(msg.sender == govAddress, "Not authorised");
-
-        _pause();
-
+    function _pause() override internal {
+        super._pause();
         IERC20(epsAddress).safeApprove(pancakeRouterAddress, uint256(0));
         IERC20(wantAddress).safeApprove(pancakeRouterAddress, uint256(0));
         IERC20(busdAddress).safeApprove(ellipsisSwapAddress, uint256(0));
@@ -153,16 +166,24 @@ contract StrategyEllipsisImpl is StrategyEllipsisStorage {
         IERC20(eps3Address).safeApprove(ellipsisStakeAddress, uint256(0));
     }
 
-    function unpause() external {
+    function pause() public {
         require(msg.sender == govAddress, "Not authorised");
-        _unpause();
+        _pause();
+    }
 
+    function _unpause() override internal {
+        super._unpause();
         IERC20(epsAddress).safeApprove(pancakeRouterAddress, uint256(-1));
         IERC20(wantAddress).safeApprove(pancakeRouterAddress, uint256(-1));
         IERC20(busdAddress).safeApprove(ellipsisSwapAddress, uint256(-1));
         IERC20(usdcAddress).safeApprove(ellipsisSwapAddress, uint256(-1));
         IERC20(usdtAddress).safeApprove(ellipsisSwapAddress, uint256(-1));
         IERC20(eps3Address).safeApprove(ellipsisStakeAddress, uint256(-1));
+    }
+
+    function unpause() external {
+        require(msg.sender == govAddress, "Not authorised");
+        _unpause();
     }
 
     
@@ -187,12 +208,12 @@ contract StrategyEllipsisImpl is StrategyEllipsisStorage {
     }
 
     function eps3ToWant() public view returns (uint256) {
-        isPoolSafe();
+        require(isPoolSafe(), "StrategyEllipsis: pool unsafe");
         (uint256 curEps3Bal, )= LpTokenStaker(ellipsisStakeAddress).userInfo(poolId, address(this));
         return curEps3Bal.mul(StableSwap(ellipsisSwapAddress).get_virtual_price()).div(1e18);
     }
 
-    function isPoolSafe() public view {
+    function isPoolSafe() public view returns (bool) {
         // CHANGES: get balances of token in stableswap except admin_fee
         uint256 busdBal = StableSwap(ellipsisSwapAddress).balances(getTokenIndex(busdAddress));
         uint256 usdcBal = StableSwap(ellipsisSwapAddress).balances(getTokenIndex(usdcAddress));
@@ -204,7 +225,7 @@ contract StrategyEllipsisImpl is StrategyEllipsisStorage {
                 (busdBal < usdtBal ? busdBal : usdtBal) : 
                 (usdcBal < usdtBal ? usdcBal : usdtBal);
 
-        require(most <= least.mul(safetyCoeffNumer).div(safetyCoeffDenom), "StrategyEllipsis: pool unsafe");
+        return most <= least.mul(safetyCoeffNumer).div(safetyCoeffDenom);
     }
 
     function wantLockedTotal() public view returns (uint256) {

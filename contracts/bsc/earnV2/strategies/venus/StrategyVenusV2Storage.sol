@@ -25,15 +25,17 @@ abstract contract StrategyVenusV2Storage is Strategy {
     address[] public venusToBELTPath;
 
     uint256 public borrowRate = 585;
-    uint256 public borrowDepth = 0;
-    uint256 public constant BORROW_RATE_MAX = 595;
-    uint256 public constant BORROW_RATE_MAX_HARD = 599;
-    uint256 public constant BORROW_DEPTH_MAX = 6;
+    uint256 public borrowDepth = 0; // unused
+    uint256 public constant BORROW_RATE_MAX = 595; // unused
+    uint256 public constant BORROW_RATE_MAX_HARD = 599; // unused
+    uint256 public constant BORROW_DEPTH_MAX = 6; // unused
 
-    uint256 public supplyBal = 0;
-    uint256 public borrowBal = 0;
-    uint256 public supplyBalTargeted = 0;
-    uint256 public supplyBalMin = 0;
+    uint256 public supplyBal = 0; // unused
+    uint256 public borrowBal = 0; // unused
+    uint256 public supplyBalTargeted = 0; // unused
+    uint256 public supplyBalMin = 0; // unused
 
     address public bnbHelper;
+
+    address public leverageAdmin;
 }

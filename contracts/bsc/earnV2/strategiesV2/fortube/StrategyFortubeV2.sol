@@ -1,7 +1,8 @@
 pragma solidity 0.6.12;
 
-import "./StrategyVenusV2Storage.sol";
-import "../../defi/venus.sol";
+import "../StrategyV2.sol";
+import "./StrategyFortubeV2Storage.sol";
+import "../../defi/fortube.sol";
 import "../../defi/pancake.sol";
 import "../../../interfaces/Wrapped.sol";
 
@@ -9,11 +10,11 @@ import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 
-contract StrategyVenusV2Impl is StrategyVenusV2Storage {
+contract StrategyFortubeV2 is Initializable, StrategyV2, StrategyFortubeV2Storage {
     using SafeERC20 for IERC20;
     using Address for address;
     using SafeMath for uint256;
-
+    
     event Deposit(address wantAddress, uint256 amountReceived, uint256 amountDeposited);
     event Withdraw(address wantAddress, uint256 amountRequested, uint256 amountWithdrawn);
     event Buyback(address earnedAddress, uint256 earnedAmount, uint256 buybackAmount, address buybackTokenAddress, uint256 burnAmount, address buybackAddress);
@@ -23,37 +24,89 @@ contract StrategyVenusV2Impl is StrategyVenusV2Storage {
         _;
     }
 
+    function __StrategyFortubeV2_init(
+        address _BELTAddress,
+        address _wantAddress,
+        address _fTokenAddress,
+        address _uniRouterAddress,
+        address[] memory _forToWantPath,
+        address[] memory _forToBELTPath
+    ) public initializer {
+        __StrategyV2_init(msg.sender, 5, 10000);
+        __StrategyFortubeV2_init_unchained(
+            _BELTAddress,
+            _wantAddress,
+            _fTokenAddress,
+            _uniRouterAddress,
+            _forToWantPath,
+            _forToBELTPath
+        );
+    }
+    
+    function __StrategyFortubeV2_init_unchained(
+        address _BELTAddress,
+        address _wantAddress,
+        address _fTokenAddress,
+        address _uniRouterAddress,
+        address[] memory _forToWantPath,
+        address[] memory _forToBELTPath
+    ) internal initializer {
+        borrowRate = 585;
+
+        BELTAddress = _BELTAddress;
+        wantAddress = _wantAddress;
+
+        if (wantAddress == wbnbAddress) {
+            isWBNB = true;
+        }
+
+        forToWantPath = _forToWantPath;
+        forToBELTPath = _forToBELTPath;
+
+
+        fTokenAddress = _fTokenAddress;
+        fortubeMarkets = [fTokenAddress];
+        uniRouterAddress = _uniRouterAddress;  
+
+
+        IERC20(forAddress).safeApprove(uniRouterAddress, uint256(-1));
+        IERC20(_wantAddress).safeApprove(uniRouterAddress, uint256(-1));
+        IERC20(_wantAddress).safeApprove(bankControllerAddress, uint256(-1));
+    }
+
     function _supply(uint256 _amount) internal {
-        if (wantIsWBNB) {
-            // venus checks and reverts on error internally
+        if (isWBNB) {
             _unwrapBNB();
-            IVBNB(vTokenAddress).mint{value: _amount}();
+            IBank(bankAddress).deposit{value: _amount}(0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB, _amount);
         } else {
-            require(IVToken(vTokenAddress).mint(_amount) == 0, "mint Venus Err");
+            IBank(bankAddress).deposit(wantAddress, _amount);
         }
     }
 
     function _removeSupply(uint256 _amount) internal {
-        require(IVToken(vTokenAddress).redeemUnderlying(_amount) == 0, "redeemUnderlying Venus Err");
-        if (wantIsWBNB) {
+        if (isWBNB) {
+            IBank(bankAddress).withdrawUnderlying(0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB, _amount);
             _wrapBNB();
+        } else {
+            IBank(bankAddress).withdrawUnderlying(wantAddress, _amount);
         }
     }
 
     function _borrow(uint256 _amount) internal {
-        require(IVToken(vTokenAddress).borrow(_amount) == 0, "borrow Venus Err");
-        if (wantIsWBNB) {
+        if (isWBNB) {
+            IBank(bankAddress).borrow(0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB, _amount);
             _wrapBNB();
+        } else {
+            IBank(bankAddress).borrow(wantAddress, _amount);
         }
     }
 
     function _repayBorrow(uint256 _amount) internal {
-        if (wantIsWBNB) {
-            // venus checks and reverts on error internally
+        if (isWBNB) {
             _unwrapBNB();
-            IVBNB(vTokenAddress).repayBorrow{value: _amount}();
+            IBank(bankAddress).repay{value: _amount}(0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB, _amount);
         } else {
-            require(IVToken(vTokenAddress).repayBorrow(_amount) == 0, "repayBorrow Venus Err");
+            IBank(bankAddress).repay(wantAddress, _amount);
         }
     }
 
@@ -83,7 +136,7 @@ contract StrategyVenusV2Impl is StrategyVenusV2Storage {
         }
 
         emit Deposit(wantAddress, _wantAmt, diffBalance);
-
+        
         return diffBalance;
     }
 
@@ -127,6 +180,7 @@ contract StrategyVenusV2Impl is StrategyVenusV2Storage {
 
         _removeSupply(_amount);
         _repayBorrow(wantLockedInHere());
+
     }
 
     function setBorrowRate(uint256 _borrowRate) external {
@@ -134,31 +188,29 @@ contract StrategyVenusV2Impl is StrategyVenusV2Storage {
         updateStrategy();
         borrowRate = _borrowRate;
         (uint256 sup, , uint256 supMin) = updateBalance();
-        require(sup >= supMin, "supply should be greater than supply min");
+        require(sup >= supMin, "supply should be greater than min supply");
     }
 
     function earn() external whenNotPaused onlyEOA {
-        IVenusDistribution(venusDistributionAddress).claimVenus(address(this));
+        if (IMiningReward(forDistributionAddress).checkBalance(address(this)) > 0) {
+            IMiningReward(forDistributionAddress).claimReward();
 
-        uint256 earnedAmt = IERC20(venusAddress).balanceOf(address(this));
-        if (earnedAmt != 0) {
+            uint256 earnedAmt = IERC20(forAddress).balanceOf(address(this));
             earnedAmt = buyBack(earnedAmt);
 
-            if (venusAddress != wantAddress) {
+            if (forAddress != wantAddress) {
                 IPancakeRouter02(uniRouterAddress).swapExactTokensForTokens(
                     earnedAmt,
                     0,
-                    venusToWantPath,
+                    forToWantPath,
                     address(this),
                     now.add(600)
                 );
             }
         }
-
         lastEarnBlock = block.number;
-        earnedAmt = wantLockedInHere();
-        if (earnedAmt != 0) {
-            _supply(earnedAmt);
+        if (wantLockedInHere() != 0) {
+            _supply(wantLockedInHere());
         }
     }
 
@@ -172,14 +224,14 @@ contract StrategyVenusV2Impl is StrategyVenusV2Storage {
         IPancakeRouter02(uniRouterAddress).swapExactTokensForTokens(
             buyBackAmt,
             0,
-            venusToBELTPath,
+            forToBELTPath,
             address(this),
             now + 600
         );
 
         uint256 burnAmt = IERC20(BELTAddress).balanceOf(address(this));
         IERC20(BELTAddress).safeTransfer(buyBackAddress, burnAmt);
-        emit Buyback(venusAddress, _earnedAmt, buyBackAmt, BELTAddress, burnAmt, buyBackAddress);
+        emit Buyback(forAddress, _earnedAmt, buyBackAmt, BELTAddress, burnAmt, buyBackAddress);
 
         return _earnedAmt.sub(buyBackAmt);
     }
@@ -205,7 +257,11 @@ contract StrategyVenusV2Impl is StrategyVenusV2Storage {
     }
 
     function _withdraw(uint256 _wantAmt) internal {
-    	(uint256 sup, uint256 brw, uint256 supMin) = updateBalance();
+        uint256 sup;
+        uint256 brw;
+        uint256 supMin;
+    	(sup, brw, supMin) = updateBalance();
+
         uint256 delevAmtAvail = sup.sub(supMin);
         while (_wantAmt > delevAmtAvail) {
             if (delevAmtAvail > brw) {
@@ -216,7 +272,7 @@ contract StrategyVenusV2Impl is StrategyVenusV2Storage {
             } else {
                 _deleverage(delevAmtAvail);
             }
-            (sup, brw, supMin) = updateBalance();  
+            (sup, brw, supMin) = updateBalance();
             delevAmtAvail = sup.sub(supMin);
         }
 
@@ -229,11 +285,9 @@ contract StrategyVenusV2Impl is StrategyVenusV2Storage {
 
     function _pause() override internal {
         super._pause();
-        IERC20(venusAddress).safeApprove(uniRouterAddress, 0);
+        IERC20(forAddress).safeApprove(uniRouterAddress, 0);
         IERC20(wantAddress).safeApprove(uniRouterAddress, 0);
-        if (!wantIsWBNB) {
-            IERC20(wantAddress).safeApprove(vTokenAddress, 0);
-        }
+        IERC20(wantAddress).safeApprove(bankControllerAddress, 0);
     }
 
     function pause() public {
@@ -243,11 +297,9 @@ contract StrategyVenusV2Impl is StrategyVenusV2Storage {
 
     function _unpause() override internal {
         super._unpause();
-        IERC20(venusAddress).safeApprove(uniRouterAddress, uint256(-1));
+        IERC20(forAddress).safeApprove(uniRouterAddress, uint256(-1));
         IERC20(wantAddress).safeApprove(uniRouterAddress, uint256(-1));
-        if (!wantIsWBNB) {
-            IERC20(wantAddress).safeApprove(vTokenAddress, uint256(-1));
-        }
+        IERC20(wantAddress).safeApprove(bankControllerAddress, uint256(-1));
     }
 
     function unpause() external {
@@ -255,11 +307,11 @@ contract StrategyVenusV2Impl is StrategyVenusV2Storage {
         _unpause();
     }
 
+
     function updateBalance() public view returns (uint256 sup, uint256 brw, uint256 supMin) {
-        (uint256 errCode, uint256 _sup, uint256 _brw, uint exchangeRate) = IVToken(vTokenAddress).getAccountSnapshot(address(this));
-        require(errCode == 0, "Venus ErrCode");
-        sup = _sup.mul(exchangeRate).div(1e18);
-        brw = _brw;
+        sup = IFToken(fTokenAddress).calcBalanceOfUnderlying(address(this));
+        brw = IFToken(fTokenAddress).borrowBalanceStored(address(this));
+
         supMin = brw.mul(1000).div(borrowRate);
     }
 
@@ -292,7 +344,7 @@ contract StrategyVenusV2Impl is StrategyVenusV2Storage {
         require(msg.sender == govAddress, "!gov");
         require(_token != earnedAddress, "!safe");
         require(_token != wantAddress, "!safe");
-        require(_token != vTokenAddress, "!safe");
+        require(_token != fTokenAddress, "!safe");
 
         IERC20(_token).safeTransfer(_to, _amount);
     }
@@ -314,7 +366,7 @@ contract StrategyVenusV2Impl is StrategyVenusV2Storage {
 
     function wrapBNB() public {
         require(msg.sender == govAddress, "Not authorised");
-        require(wantIsWBNB, "!wantIsWBNB");
+        require(isWBNB, "!isWBNB");
         _wrapBNB();
     }
 
@@ -341,56 +393,18 @@ contract StrategyVenusV2Impl is StrategyVenusV2Storage {
         bnbHelper = _helper;
     }
 
-    function setXVSToWantPath(address[] memory newPath) public {
+    function setForToWantPath(address[] memory newPath) public {
         require(msg.sender == govAddress, "Not authorised");
-        venusToWantPath = newPath;
+        forToWantPath = newPath;
     }
 
     function updateStrategy() public {
-        require(IVToken(vTokenAddress).accrueInterest() == 0);
+        _supply(0);
     }
 
     function setLeverageAdmin(address _leverageAdmin) external {
         require(msg.sender == govAddress, "Not authorized");
         leverageAdmin = _leverageAdmin;
-    } 
-
-    function resetUnusedVars() public {
-        require(msg.sender == govAddress, "!gov");
-        borrowDepth = 0;
-        supplyBal = 0;
-        borrowBal = 0; 
-        supplyBalTargeted = 0; 
-        supplyBalMin = 0; 
-    }
-
-    function migrateTo(address targetAddress) internal {
-        require(wantAddress != address(0));
-        
-        // claim xvs if there is any
-        // vToken transfer
-        // wantToken transfer if there is any
-        // xvs transfer
-        
-        IVenusDistribution(venusDistributionAddress).claimVenus(address(this));
-        uint256 vTokenBalance = IVToken(vTokenAddress).balanceOf(address(this));
-        // vToken should not use safe transfer
-        require(IVToken(vTokenAddress).transfer(targetAddress, vTokenBalance));
-        if (wantIsWBNB) {
-            _wrapBNB();
-        }
-        
-        uint256 wantBalance = IERC20(wantAddress).balanceOf(address(this));
-        IERC20(wantAddress).safeTransfer(targetAddress, wantBalance);
-
-        uint256 xvsBalance = IERC20(venusAddress).balanceOf(address(this));
-        IERC20(venusAddress).safeTransfer(targetAddress, xvsBalance);
-        
-        wantAddress = address(0);
-    }
-
-    function migrateToV3() external {
-        require(msg.sender == govAddress, "!gov");
     }
 
     fallback() external payable {}

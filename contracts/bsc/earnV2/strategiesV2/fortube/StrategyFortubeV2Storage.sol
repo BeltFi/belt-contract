@@ -1,9 +1,7 @@
 pragma solidity 0.6.12;
 
-import "../Strategy.sol";
-
-abstract contract StrategyFortubeStorage is Strategy {
-    bool public isWBNB = false;
+contract StrategyFortubeV2Storage {
+    bool public isWBNB;
     address public wantAddress;
     address public fTokenAddress;
     address[] public fortubeMarkets;
@@ -26,16 +24,7 @@ abstract contract StrategyFortubeStorage is Strategy {
     address[] public forToWantPath;
     address[] public forToBELTPath;
 
-    uint256 public borrowRate = 585;
-    uint256 public borrowDepth = 0; // unused
-    uint256 public constant BORROW_RATE_MAX = 840; // unused
-    uint256 public constant BORROW_RATE_MAX_HARD = 845; // unused
-    uint256 public constant BORROW_DEPTH_MAX = 6; // unused
-
-    uint256 public supplyBal = 0; // unused
-    uint256 public borrowBal = 0; // unused
-    uint256 public supplyBalTargeted = 0; // unused
-    uint256 public supplyBalMin = 0; // unused
+    uint256 public borrowRate;
 
     address public bnbHelper;
 

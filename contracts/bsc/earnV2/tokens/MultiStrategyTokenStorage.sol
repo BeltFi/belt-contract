@@ -3,6 +3,7 @@ pragma solidity 0.6.12;
 import "./StrategyToken.sol";
 
 abstract contract MultiStrategyTokenStorage is StrategyToken {
+
     address public constant wbnbAddress =
         0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c;
 

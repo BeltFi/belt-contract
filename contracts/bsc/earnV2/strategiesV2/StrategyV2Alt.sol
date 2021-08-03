@@ -14,7 +14,6 @@ abstract contract StrategyV2 is Initializable, OwnableUpgradeable, ReentrancyGua
     uint256 public constant buyBackRateMax = 10000;
     uint256 public constant buyBackRateUL = 800;
     
-
     address public buyBackAddress;
 
     uint256 public withdrawFeeNumer;
