@@ -30,4 +30,7 @@ abstract contract StrategyAlpacaStorage is Strategy {
     address[] public wantToBELTPath;
 
     address public bnbHelper;
+
+    uint256 public buyBackPoolRate;
+    address public buyBackPoolAddress;
 }

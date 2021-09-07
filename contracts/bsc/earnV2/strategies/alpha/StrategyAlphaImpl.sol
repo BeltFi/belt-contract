@@ -6,6 +6,7 @@ import "../../defi/alphaHomora.sol";
 import "../../defi/pancake.sol";
 import "../../../interfaces/Wrapped.sol";
 
+
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -67,7 +68,9 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
         _wantAmt = _wantAmt.mul(withdrawFeeDenom.sub(withdrawFeeNumer)).div(withdrawFeeDenom);
 
         if (_wantAmt > wantLockedInHere()) {
-            _withdraw(_wantAmt);
+            uint256 withdrawAmt = _wantAmt.sub(wantLockedInHere());
+            balanceSnapshot = balanceSnapshot.sub(withdrawAmt);
+            _withdraw(withdrawAmt);
         }
 
         uint256 wantBal = IERC20(wantAddress).balanceOf(address(this));
@@ -77,8 +80,6 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
         }
 
         IERC20(wantAddress).safeTransfer(owner(), wantBal);
-        
-        balanceSnapshot = balanceSnapshot.sub(_wantAmt);
 
         emit Withdraw(wantAddress, _wantAmt, wantBal);
 
@@ -86,7 +87,7 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
     }
 
     function _withdraw(uint256 _wantAmt) internal {
-        uint256 amount = _wantAmt.sub(wantLockedInHere()).mul(
+        uint256 amount = _wantAmt.mul(
             IERC20(bankAddress).totalSupply()
         ).div(Bank(bankAddress).totalBNB());      
         Bank(bankAddress).withdraw(amount);
@@ -134,8 +135,8 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
     }
 
     function buyBackWant(uint256 _earnedAmt) internal {
-        if (buyBackRate != 0) {
-            uint256 buyBackAmt = _earnedAmt.mul(buyBackRate).div(buyBackRateMax);
+        if (buyBackRate != 0 || buyBackPoolRate != 0) {
+            uint256 buyBackAmt = _earnedAmt.mul(buyBackRate.add(buyBackPoolRate)).div(buyBackRateMax);
             
             _wrapBNB();
             uint256 curWantBal = wantLockedInHere();
@@ -155,18 +156,28 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
                 now + 600
             );
 
-            uint256 burnAmt = IERC20(BELTAddress).balanceOf(address(this));
-            IERC20(BELTAddress).safeTransfer(buyBackAddress, burnAmt);
-            emit BuybackWant(wantAddress, _earnedAmt, buyBackAmt, BELTAddress, burnAmt, buyBackAddress);
+            uint256 burnAmt = IERC20(BELTAddress).balanceOf(address(this))
+                .mul(buyBackPoolRate)
+                .div(buyBackPoolRate.add(buyBackRate));
+            if (burnAmt != 0) {
+                IERC20(BELTAddress).safeTransfer(buyBackPoolAddress, burnAmt);
+                emit BuybackWant(wantAddress, _earnedAmt, buyBackAmt, BELTAddress, burnAmt, buyBackPoolAddress);
+            }
+
+            burnAmt = IERC20(BELTAddress).balanceOf(address(this));
+            if (burnAmt != 0) {
+                IERC20(BELTAddress).safeTransfer(buyBackAddress, burnAmt);
+                emit BuybackWant(wantAddress, _earnedAmt, buyBackAmt, BELTAddress, burnAmt, buyBackAddress);
+            }
         }
     }
 
     function buyBack(uint256 _earnedAmt) internal returns (uint256) {
-        if (buyBackRate <= 0) {
+        if (buyBackRate == 0 && buyBackPoolRate == 0) {
             return _earnedAmt;
         }
 
-        uint256 buyBackAmt = _earnedAmt.mul(buyBackRate).div(buyBackRateMax);
+        uint256 buyBackAmt = _earnedAmt.mul(buyBackRate.add(buyBackPoolRate)).div(buyBackRateMax);
 
         IPancakeRouter02(pancakeRouterAddress).swapExactTokensForTokens(
             buyBackAmt,
@@ -176,10 +187,19 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
             now + 600
         );
 
-        uint256 burnAmt = IERC20(BELTAddress).balanceOf(address(this));
-        IERC20(BELTAddress).safeTransfer(buyBackAddress, burnAmt);
-        emit Buyback(alphaAddress, _earnedAmt, buyBackAmt, BELTAddress, burnAmt, buyBackAddress);
+        uint256 burnAmt = IERC20(BELTAddress).balanceOf(address(this))
+            .mul(buyBackPoolRate)
+            .div(buyBackPoolRate.add(buyBackRate));
+        if (burnAmt != 0) {
+            IERC20(BELTAddress).safeTransfer(buyBackPoolAddress, burnAmt);
+            emit Buyback(alphaAddress, _earnedAmt, buyBackAmt, BELTAddress, burnAmt, buyBackPoolAddress);
+        }
 
+        burnAmt = IERC20(BELTAddress).balanceOf(address(this));
+        if (burnAmt != 0) {
+            IERC20(BELTAddress).safeTransfer(buyBackAddress, burnAmt);
+            emit Buyback(alphaAddress, _earnedAmt, buyBackAmt, BELTAddress, burnAmt, buyBackAddress);
+        }
         return _earnedAmt.sub(buyBackAmt);
     }
 
@@ -216,11 +236,14 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
         return wantBal;
     }
 
-    function setbuyBackRate(uint256 _buyBackRate) public {
+    function setbuyBackRate(uint256 _buyBackRate, uint256 _buyBackPoolRate) public {
         require(msg.sender == govAddress, "Not authorised");
         require(_buyBackRate <= buyBackRateUL, "too high");
+        require(_buyBackPoolRate <= buyBackRateUL, "too high");
         buyBackRate = _buyBackRate;
+        buyBackPoolRate = _buyBackPoolRate;
     }
+
 
     function setGov(address _govAddress) public {
         require(msg.sender == govAddress, "Not authorised");
@@ -281,6 +304,16 @@ contract StrategyAlphaImpl is StrategyAlphaStorage {
     function updateStrategy() public {
     }
 
+    function setbuyBackPoolAddress(address _buyBackPoolAddress) external {
+        require(msg.sender == govAddress, "Not authorised");
+        require(_buyBackPoolAddress != address(0));
+        require(_buyBackPoolAddress != buyBackPoolAddress);
+        if (buyBackPoolAddress != address(0)) {
+            IERC20(BELTAddress).safeApprove(buyBackPoolAddress, 0);
+        }
+        IERC20(BELTAddress).safeApprove(_buyBackPoolAddress, uint256(-1));
+        buyBackPoolAddress = _buyBackPoolAddress;
+    }
 
     fallback() external payable {}
     receive() external payable {}

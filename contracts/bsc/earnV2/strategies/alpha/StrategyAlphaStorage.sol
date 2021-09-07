@@ -30,4 +30,7 @@ abstract contract StrategyAlphaStorage is Strategy {
     // cake to BELT
 
     address public bnbHelper;
+    
+    uint256 public buyBackPoolRate;
+    address public buyBackPoolAddress;
 }

@@ -38,4 +38,7 @@ abstract contract StrategyEllipsisStorage is Strategy {
 
     address[] public EPSToWantPath;
     address[] public EPSToBELTPath;
+
+    uint256 public buyBackPoolRate;
+    address public buyBackPoolAddress;
 }

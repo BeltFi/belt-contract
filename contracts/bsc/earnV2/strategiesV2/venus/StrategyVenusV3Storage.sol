@@ -25,4 +25,7 @@ contract StrategyVenusV3Storage {
     address public bnbHelper;
 
     address public leverageAdmin;
+    
+    uint256 public buyBackPoolRate;
+    address public buyBackPoolAddress;
 }

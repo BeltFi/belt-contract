@@ -1,13 +1,11 @@
 pragma solidity 0.6.12;
 
-import "./StrategyV2.sol";
+import "../StrategyV2.sol";
+import "./StrategyVoidV2Storage.sol";
 
 import "@openzeppelin/contracts/token/ERC20/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-contract StrategyVoidV2Storage {
-    address wantAddress;
-}
 
 contract StrategyVoidV2 is Initializable, StrategyV2, StrategyVoidV2Storage {
     using SafeERC20 for IERC20;
